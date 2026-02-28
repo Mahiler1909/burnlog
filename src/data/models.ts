@@ -12,8 +12,19 @@ export interface Exchange {
   estimatedCostUSD: number;
   model: string;
   toolsUsed: string[];
+  filesRead: string[];
+  filesModified: string[];
   timestamp: Date;
   category: ExchangeCategory;
+}
+
+export interface JSONLActivityStats {
+  linesAdded: number;
+  linesRemoved: number;
+  filesModified: Set<string>;
+  filesRead: Set<string>;
+  editCount: number;
+  writeCount: number;
 }
 
 export type ExchangeCategory =

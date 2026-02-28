@@ -210,6 +210,17 @@ export function renderSessionDetail(session: Session): void {
     console.log(`  Languages: ${Object.entries(session.languages).map(([k, v]) => `${k}:${v}`).join(", ")}`);
   }
 
+  // Files modified (derived from exchanges)
+  const allModifiedFiles = new Set<string>();
+  const allReadFiles = new Set<string>();
+  for (const ex of session.exchanges) {
+    for (const f of ex.filesModified) allModifiedFiles.add(f);
+    for (const f of ex.filesRead) allReadFiles.add(f);
+  }
+  if (allModifiedFiles.size > 0) {
+    console.log(`  Modified:  ${[...allModifiedFiles].join(", ")}`);
+  }
+
   // Frictions
   if (session.frictions.length > 0) {
     console.log();

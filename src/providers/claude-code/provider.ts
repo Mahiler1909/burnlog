@@ -10,6 +10,7 @@ import type {
   TokenUsage,
   SessionOutcome,
   Friction,
+  JSONLActivityStats,
   RawSessionIndex,
   RawFacets,
   RawSessionMeta,
@@ -135,9 +136,10 @@ export class ClaudeCodeProvider implements AIToolProvider {
     const facets = this.facetsCache?.get(entry.sessionId);
     const meta = this.metaCache?.get(entry.sessionId);
 
-    // Parse exchanges from JSONL
+    // Parse exchanges from JSONL (source of truth for tokens, files, lines)
     const parseResult = await this.parseJSONL(entry.fullPath);
     const exchanges = parseResult.exchanges;
+    const activity = parseResult.activity;
 
     // Calculate token usage: prefer JSONL exchange-level data, fallback to meta
     let tokenUsage: TokenUsage;
@@ -203,9 +205,11 @@ export class ClaudeCodeProvider implements AIToolProvider {
 
       toolCounts: meta?.tool_counts || {},
       languages: meta?.languages || {},
-      linesAdded: meta?.lines_added || 0,
-      linesRemoved: meta?.lines_removed || 0,
-      filesModified: meta?.files_modified || 0,
+      // Prefer JSONL-derived activity stats (accurate across /compact boundaries)
+      // Fallback to session-meta only when JSONL has no data
+      linesAdded: activity.linesAdded > 0 ? activity.linesAdded : (meta?.lines_added || 0),
+      linesRemoved: activity.linesRemoved > 0 ? activity.linesRemoved : (meta?.lines_removed || 0),
+      filesModified: activity.filesModified.size > 0 ? activity.filesModified.size : (meta?.files_modified || 0),
       gitCommits: meta?.git_commits || 0,
       toolErrors: meta?.tool_errors || 0,
       userInterruptions: meta?.user_interruptions || 0,
@@ -214,9 +218,19 @@ export class ClaudeCodeProvider implements AIToolProvider {
     };
   }
 
-  private async parseJSONL(filePath: string): Promise<{ exchanges: Exchange[]; gitBranch: string }> {
+  private async parseJSONL(filePath: string): Promise<{
+    exchanges: Exchange[];
+    gitBranch: string;
+    activity: JSONLActivityStats;
+  }> {
     const content = await readFile(filePath, "utf-8").catch(() => "");
-    if (!content) return { exchanges: [], gitBranch: "" };
+    if (!content) {
+      return {
+        exchanges: [],
+        gitBranch: "",
+        activity: { linesAdded: 0, linesRemoved: 0, filesModified: new Set(), filesRead: new Set(), editCount: 0, writeCount: 0 },
+      };
+    }
 
     const exchanges: Exchange[] = [];
     const lines = content.split("\n").filter(Boolean);
@@ -224,6 +238,15 @@ export class ClaudeCodeProvider implements AIToolProvider {
     let currentUserPrompt = "";
     let sequenceNumber = 0;
     let gitBranch = "";
+
+    const activity: JSONLActivityStats = {
+      linesAdded: 0,
+      linesRemoved: 0,
+      filesModified: new Set(),
+      filesRead: new Set(),
+      editCount: 0,
+      writeCount: 0,
+    };
 
     for (const line of lines) {
       let msg: RawJSONLMessage;
@@ -259,9 +282,54 @@ export class ClaudeCodeProvider implements AIToolProvider {
         const usage = msg.message.usage;
         const model = msg.message.model || "unknown";
         const contentArr = Array.isArray(msg.message.content) ? msg.message.content : [];
-        const toolsUsed = contentArr
-          .filter((c) => c.type === "tool_use" && c.name)
-          .map((c) => c.name!);
+
+        const toolsUsed: string[] = [];
+        const filesRead: string[] = [];
+        const filesModified: string[] = [];
+
+        for (const block of contentArr) {
+          if (block.type !== "tool_use" || !block.name) continue;
+          toolsUsed.push(block.name);
+
+          const input = block.input as Record<string, any> | undefined;
+          if (!input) continue;
+
+          const filePath = input.file_path || input.path || "";
+          if (!filePath) continue;
+          const fileName = typeof filePath === "string" ? filePath.split("/").pop() || filePath : "";
+
+          switch (block.name) {
+            case "Read":
+              activity.filesRead.add(fileName);
+              filesRead.push(fileName);
+              break;
+            case "Edit": {
+              activity.filesModified.add(fileName);
+              activity.editCount++;
+              filesModified.push(fileName);
+              // Calculate lines from old_string/new_string
+              const oldStr = typeof input.old_string === "string" ? input.old_string : "";
+              const newStr = typeof input.new_string === "string" ? input.new_string : "";
+              const oldLines = oldStr ? oldStr.split("\n").length : 0;
+              const newLines = newStr ? newStr.split("\n").length : 0;
+              activity.linesAdded += Math.max(0, newLines - oldLines);
+              activity.linesRemoved += Math.max(0, oldLines - newLines);
+              break;
+            }
+            case "Write": {
+              activity.filesModified.add(fileName);
+              activity.writeCount++;
+              filesModified.push(fileName);
+              const writeContent = typeof input.content === "string" ? input.content : "";
+              activity.linesAdded += writeContent ? writeContent.split("\n").length : 0;
+              break;
+            }
+            case "Glob":
+            case "Grep":
+              // These don't have a single file_path
+              break;
+          }
+        }
 
         const tokenUsage: TokenUsage = {
           inputTokens: usage.input_tokens || 0,
@@ -279,6 +347,8 @@ export class ClaudeCodeProvider implements AIToolProvider {
           estimatedCostUSD: calculateCost(tokenUsage, model),
           model,
           toolsUsed,
+          filesRead,
+          filesModified,
           timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
           category,
         });
@@ -287,7 +357,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
       }
     }
 
-    return { exchanges, gitBranch };
+    return { exchanges, gitBranch, activity };
   }
 
   private classifyExchange(toolsUsed: string[], _prompt: string): ExchangeCategory {
