@@ -1,0 +1,32 @@
+{
+  "name": "burnlog",
+  "version": "0.1.0",
+  "description": "Correlate AI coding assistant token usage with real development work",
+  "type": "module",
+  "bin": {
+    "burnlog": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "claude-code",
+    "token-usage",
+    "cost-tracking",
+    "developer-tools",
+    "ai-analytics"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "cli-table3": "^0.6.5",
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}
