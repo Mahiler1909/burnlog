@@ -65,14 +65,51 @@ export class ClaudeCodeProvider implements AIToolProvider {
     const projectDir = join(PROJECTS_DIR, projectEncodedPath);
     const indexPath = join(projectDir, "sessions-index.json");
     const indexData = await this.readJSON<RawSessionIndex>(indexPath);
-    if (!indexData) return [];
 
     await this.ensureCaches();
 
     const sessions: Session[] = [];
-    for (const entry of indexData.entries) {
-      const originalPath = indexData.originalPath || entry.projectPath || this.decodePath(projectEncodedPath);
-      const session = await this.buildSession(entry, originalPath);
+    const indexedSessionIds = new Set<string>();
+    const originalPath = indexData?.originalPath || this.decodePath(projectEncodedPath);
+
+    // 1. Load sessions from index
+    if (indexData) {
+      for (const entry of indexData.entries) {
+        const entryPath = indexData.originalPath || entry.projectPath || this.decodePath(projectEncodedPath);
+        const session = await this.buildSession(entry, entryPath);
+        if (session) sessions.push(session);
+        indexedSessionIds.add(entry.sessionId);
+      }
+    }
+
+    // 2. Discover orphaned JSONL files not in the index
+    const files = await readdir(projectDir).catch(() => []);
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      const sessionId = file.replace(".jsonl", "");
+      if (indexedSessionIds.has(sessionId)) continue;
+
+      // Build a minimal index entry from the JSONL + meta/facets
+      const fullPath = join(projectDir, file);
+      const meta = this.metaCache?.get(sessionId);
+      const facets = this.facetsCache?.get(sessionId);
+      const fileStat = await stat(fullPath).catch(() => null);
+
+      const syntheticEntry: RawSessionIndex["entries"][0] = {
+        sessionId,
+        fullPath,
+        fileMtime: fileStat?.mtimeMs ?? 0,
+        firstPrompt: meta?.first_prompt || facets?.brief_summary || "",
+        summary: facets?.brief_summary || "",
+        messageCount: (meta?.user_message_count ?? 0) + (meta?.assistant_message_count ?? 0),
+        created: meta?.start_time || fileStat?.birthtime?.toISOString() || new Date().toISOString(),
+        modified: fileStat?.mtime?.toISOString() || new Date().toISOString(),
+        gitBranch: "",
+        projectPath: meta?.project_path || originalPath,
+        isSidechain: false,
+      };
+
+      const session = await this.buildSession(syntheticEntry, meta?.project_path || originalPath);
       if (session) sessions.push(session);
     }
 
@@ -99,7 +136,8 @@ export class ClaudeCodeProvider implements AIToolProvider {
     const meta = this.metaCache?.get(entry.sessionId);
 
     // Parse exchanges from JSONL
-    const exchanges = await this.parseJSONL(entry.fullPath);
+    const parseResult = await this.parseJSONL(entry.fullPath);
+    const exchanges = parseResult.exchanges;
 
     // Calculate token usage: prefer JSONL exchange-level data, fallback to meta
     let tokenUsage: TokenUsage;
@@ -146,7 +184,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
       projectName: basename(originalPath),
       summary: entry.summary || facets?.brief_summary || "",
       firstPrompt: this.truncate(entry.firstPrompt, 120),
-      gitBranch: entry.gitBranch || "",
+      gitBranch: entry.gitBranch || parseResult.gitBranch || "",
       startTime,
       endTime,
       durationMinutes: meta?.duration_minutes ?? Math.round((endTime.getTime() - startTime.getTime()) / 60000),
@@ -176,15 +214,16 @@ export class ClaudeCodeProvider implements AIToolProvider {
     };
   }
 
-  private async parseJSONL(filePath: string): Promise<Exchange[]> {
+  private async parseJSONL(filePath: string): Promise<{ exchanges: Exchange[]; gitBranch: string }> {
     const content = await readFile(filePath, "utf-8").catch(() => "");
-    if (!content) return [];
+    if (!content) return { exchanges: [], gitBranch: "" };
 
     const exchanges: Exchange[] = [];
     const lines = content.split("\n").filter(Boolean);
 
     let currentUserPrompt = "";
     let sequenceNumber = 0;
+    let gitBranch = "";
 
     for (const line of lines) {
       let msg: RawJSONLMessage;
@@ -192,6 +231,11 @@ export class ClaudeCodeProvider implements AIToolProvider {
         msg = JSON.parse(line);
       } catch {
         continue;
+      }
+
+      // Capture gitBranch from first message that has it
+      if (!gitBranch && msg.gitBranch) {
+        gitBranch = msg.gitBranch;
       }
 
       if (msg.type === "user") {
@@ -243,7 +287,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
       }
     }
 
-    return exchanges;
+    return { exchanges, gitBranch };
   }
 
   private classifyExchange(toolsUsed: string[], _prompt: string): ExchangeCategory {

@@ -169,8 +169,8 @@ export function renderSessionsList(sessions: Session[]): void {
       s.startTime.toISOString().slice(0, 10),
       s.projectName.slice(0, 18),
       (s.gitBranch || "—").slice(0, 14),
-      formatCurrency(s.estimatedCostUSD),
-      formatTokens(totalTokens(s.tokenUsage)),
+      s.estimatedCostUSD > 0 ? formatCurrency(s.estimatedCostUSD) : chalk.dim("n/a"),
+      totalTokens(s.tokenUsage) > 0 ? formatTokens(totalTokens(s.tokenUsage)) : chalk.dim("n/a"),
       outcomeIcon(s.outcome),
       (s.summary || s.firstPrompt).slice(0, 34),
     ]);
