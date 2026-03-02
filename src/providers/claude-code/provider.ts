@@ -111,8 +111,14 @@ export class ClaudeCodeProvider implements AIToolProvider {
       if (session) sessions.push(session);
     }
 
-    // Filter out empty/ghost sessions (no JSONL data, no tokens, no messages)
-    return sessions.filter((s) => s.exchanges.length > 0 || s.messageCount > 0);
+    // Filter out empty/ghost sessions:
+    // - No exchanges AND no messages = deleted JSONL
+    // - Has messageCount but 0 cost and no exchanges = opened and closed without use
+    return sessions.filter((s) => {
+      if (s.exchanges.length > 0) return true;
+      if (s.messageCount > 0 && s.estimatedCostUSD > 0) return true;
+      return false;
+    });
   }
 
   async loadAllSessions(): Promise<Session[]> {

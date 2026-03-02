@@ -280,7 +280,7 @@ export function renderSessionDetail(session: Session): void {
   console.log();
 }
 
-export function renderBranchDetail(bw: BranchWork): void {
+export function renderBranchDetail(bw: BranchWork, warnings?: string[]): void {
   const linesAdded = bw.commits.reduce((s, c) => s + c.linesAdded, 0);
   const linesRemoved = bw.commits.reduce((s, c) => s + c.linesRemoved, 0);
   const totalLines = linesAdded + linesRemoved;
@@ -340,6 +340,13 @@ export function renderBranchDetail(bw: BranchWork): void {
     console.log(commitTable.toString());
   } else {
     console.log(chalk.dim("  No git commits found for this branch."));
+  }
+
+  if (warnings && warnings.length > 0) {
+    console.log();
+    for (const w of warnings) {
+      console.log(chalk.yellow(`  ⚠ ${w}`));
+    }
   }
 
   console.log();

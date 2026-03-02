@@ -13,26 +13,20 @@ export async function compareCommand(
   const git = new GitAnalyzer();
   const engine = new CorrelationEngine(git);
 
-  // Find sessions for each branch
-  const sessionsA = sessions.filter(
-    (s) => s.gitBranch === branchA || s.gitBranch.includes(branchA),
-  );
-  const sessionsB = sessions.filter(
-    (s) => s.gitBranch === branchB || s.gitBranch.includes(branchB),
-  );
-
-  if (sessionsA.length === 0 && sessionsB.length === 0) {
-    console.log(`No sessions found for either branch.`);
-    return;
+  // Resolve git root from all session paths
+  const uniquePaths = [...new Set(sessions.map(s => s.projectPath))];
+  let projectPath = uniquePaths[0] || "";
+  for (const p of uniquePaths) {
+    const root = await git.resolveGitRoot(p);
+    if (root) { projectPath = root; break; }
   }
 
-  const projectPath = sessionsA[0]?.projectPath || sessionsB[0]?.projectPath;
-
-  const workA = await engine.correlateBranch(branchA, projectPath, sessionsA);
-  const workB = await engine.correlateBranch(branchB, projectPath, sessionsB);
+  // Pass ALL sessions — correlateBranch handles HEAD resolution and branch matching
+  const workA = await engine.correlateBranch(branchA, projectPath, sessions);
+  const workB = await engine.correlateBranch(branchB, projectPath, sessions);
 
   if (!workA && !workB) {
-    console.log("Could not correlate either branch.");
+    console.log(`No sessions found for either branch.`);
     return;
   }
 

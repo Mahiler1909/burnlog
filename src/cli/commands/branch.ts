@@ -20,25 +20,38 @@ export async function branchCommand(
     );
   }
 
-  // Find sessions matching the branch (exact or partial match)
-  const branchSessions = sessions.filter(
-    (s) => s.gitBranch === branchName || s.gitBranch.includes(branchName),
-  );
-
-  if (branchSessions.length === 0) {
-    console.log(`No sessions found for branch: ${branchName}`);
+  if (sessions.length === 0) {
+    console.log(`No sessions found${options.project ? ` for project: ${options.project}` : ""}`);
     return;
   }
 
   const git = new GitAnalyzer();
   const engine = new CorrelationEngine(git);
-  const projectPath = branchSessions[0].projectPath;
 
-  const branchWork = await engine.correlateBranch(branchName, projectPath, branchSessions);
+  // Resolve git root from ALL project sessions (some may have stale paths)
+  const uniquePaths = [...new Set(sessions.map(s => s.projectPath))];
+  let projectPath = uniquePaths[0];
+  let repoFound = false;
+  for (const p of uniquePaths) {
+    const root = await git.resolveGitRoot(p);
+    if (root) { projectPath = root; repoFound = true; break; }
+  }
+
+  // Collect warnings
+  const warnings: string[] = [];
+  if (!repoFound) {
+    warnings.push(`Git repo not found at any known path. Commits cannot be correlated.`);
+    for (const p of uniquePaths) {
+      warnings.push(`  Tried: ${p}`);
+    }
+  }
+
+  // Pass ALL sessions — correlateBranch handles HEAD resolution and branch matching
+  const branchWork = await engine.correlateBranch(branchName, projectPath, sessions);
   if (!branchWork) {
-    console.log("Could not correlate branch data.");
+    console.log(`No sessions found for branch: ${branchName}`);
     return;
   }
 
-  renderBranchDetail(branchWork);
+  renderBranchDetail(branchWork, warnings);
 }

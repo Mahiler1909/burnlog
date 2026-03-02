@@ -132,7 +132,10 @@ export type WasteType =
   | "context_rebuild"
   | "wrong_approach"
   | "excessive_exploration"
-  | "error_cascade";
+  | "error_cascade"
+  | "debugging_loop"
+  | "high_cost_per_line"
+  | "stalled_exploration";
 
 export type MatchStrategy = "branch_name" | "temporal" | "file_overlap" | "none";
 

@@ -6,13 +6,18 @@ export class InsightsEngine {
 
     for (const session of sessions) {
       signals.push(...detectRetryLoops(session));
+      signals.push(...detectDebuggingLoops(session));
       const abandoned = detectAbandonedSession(session);
       if (abandoned) signals.push(abandoned);
       signals.push(...detectContextRebuilds(session));
       const excessive = detectExcessiveExploration(session);
       if (excessive) signals.push(excessive);
+      const stalled = detectStalledExploration(session);
+      if (stalled) signals.push(stalled);
       const cascade = detectErrorCascade(session);
       if (cascade) signals.push(cascade);
+      const costPerLine = detectHighCostPerLine(session);
+      if (costPerLine) signals.push(costPerLine);
       signals.push(...detectKnownFrictions(session));
     }
 
@@ -214,6 +219,152 @@ function detectKnownFrictions(session: Session): WasteSignal[] {
   }
 
   return signals;
+}
+
+/**
+ * Detect consecutive implementation/debugging exchanges on the same files
+ * where prompts indicate "still broken" patterns (relaxed: file overlap only, no Jaccard).
+ * Catches patterns like: "sigue igual", "esta igual", "no funciona", "still broken"
+ */
+function detectDebuggingLoops(session: Session): WasteSignal[] {
+  const signals: WasteSignal[] = [];
+  if (session.exchanges.length < 3) return signals;
+
+  let streak = 1;
+  let streakCost = 0;
+  let streakFiles: string[] = [];
+
+  for (let i = 1; i < session.exchanges.length; i++) {
+    const prev = session.exchanges[i - 1];
+    const curr = session.exchanges[i];
+
+    const bothWorkExchanges =
+      (curr.category === "implementation" || curr.category === "debugging") &&
+      (prev.category === "implementation" || prev.category === "debugging");
+
+    const fileOverlap = curr.filesModified.length > 0 &&
+      curr.filesModified.some((f) => prev.filesModified.includes(f));
+
+    if (bothWorkExchanges && fileOverlap) {
+      streak++;
+      streakCost += curr.estimatedCostUSD;
+      streakFiles = [...new Set([...streakFiles, ...curr.filesModified])];
+    } else {
+      if (streak >= 4) {
+        signals.push({
+          type: "debugging_loop",
+          sessionId: session.id,
+          estimatedWastedCostUSD: streakCost * 0.5,
+          description: `${streak} consecutive fix attempts on ${streakFiles.slice(0, 3).map(f => f.split("/").pop()).join(", ")}`,
+          suggestion: "Step back and rethink the approach instead of iterating on the same fix",
+        });
+      }
+      streak = 1;
+      streakCost = 0;
+      streakFiles = [];
+    }
+  }
+
+  if (streak >= 4) {
+    signals.push({
+      type: "debugging_loop",
+      sessionId: session.id,
+      estimatedWastedCostUSD: streakCost * 0.5,
+      description: `${streak} consecutive fix attempts on ${streakFiles.slice(0, 3).map(f => f.split("/").pop()).join(", ")}`,
+      suggestion: "Step back and rethink the approach instead of iterating on the same fix",
+    });
+  }
+
+  return signals;
+}
+
+/**
+ * Detect sessions with very high cost relative to lines changed.
+ * Only for sessions with few lines changed but significant cost.
+ */
+function detectHighCostPerLine(session: Session): WasteSignal | null {
+  const totalLines = session.linesAdded + session.linesRemoved;
+  if (totalLines <= 0 || session.estimatedCostUSD < 10) return null;
+
+  const costPerLine = session.estimatedCostUSD / totalLines;
+
+  // Flag if > $1/line and session cost > $20
+  if (costPerLine > 1.0 && session.estimatedCostUSD > 20) {
+    const excessCost = session.estimatedCostUSD - (totalLines * 0.10); // $0.10/line is "normal"
+    return {
+      type: "high_cost_per_line",
+      sessionId: session.id,
+      estimatedWastedCostUSD: Math.max(excessCost * 0.3, 0), // 30% of excess is waste
+      description: `$${costPerLine.toFixed(2)}/line (${totalLines} lines changed for $${session.estimatedCostUSD.toFixed(2)})`,
+      suggestion: "High cost per line suggests excessive iteration. Consider manual edits for small changes",
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Detect "continua" / stalled exploration: consecutive exploration exchanges
+ * with minimal prompts, costing significant money.
+ */
+function detectStalledExploration(session: Session): WasteSignal | null {
+  if (session.exchanges.length < 3) return null;
+
+  let explorationStreak = 0;
+  let streakCost = 0;
+  const minimalPrompts = new Set(["continua", "continue", "sigue", "dale", "go", "next", "listo", "ok"]);
+
+  for (const ex of session.exchanges) {
+    const isExploration = ex.category === "exploration";
+    const isMinimalPrompt = minimalPrompts.has(ex.userPrompt.toLowerCase().trim());
+
+    if (isExploration || isMinimalPrompt) {
+      explorationStreak++;
+      streakCost += ex.estimatedCostUSD;
+    } else {
+      explorationStreak = 0;
+      streakCost = 0;
+    }
+  }
+
+  // Also check for runs (not just trailing)
+  let maxStreak = 0;
+  let maxStreakCost = 0;
+  let currentStreak = 0;
+  let currentCost = 0;
+
+  for (const ex of session.exchanges) {
+    const isExploration = ex.category === "exploration";
+    const isMinimalPrompt = minimalPrompts.has(ex.userPrompt.toLowerCase().trim());
+
+    if (isExploration || isMinimalPrompt) {
+      currentStreak++;
+      currentCost += ex.estimatedCostUSD;
+    } else {
+      if (currentStreak > maxStreak) {
+        maxStreak = currentStreak;
+        maxStreakCost = currentCost;
+      }
+      currentStreak = 0;
+      currentCost = 0;
+    }
+  }
+  if (currentStreak > maxStreak) {
+    maxStreak = currentStreak;
+    maxStreakCost = currentCost;
+  }
+
+  if (maxStreak >= 3 && maxStreakCost > 10) {
+    return {
+      type: "stalled_exploration",
+      sessionId: session.id,
+      estimatedWastedCostUSD: maxStreakCost * 0.4,
+      description: `${maxStreak} consecutive exploration/minimal-prompt exchanges costing $${maxStreakCost.toFixed(2)}`,
+      suggestion: "Give more specific instructions instead of repeating 'continua'",
+    };
+  }
+
+  return null;
 }
 
 // --- Utilities ---

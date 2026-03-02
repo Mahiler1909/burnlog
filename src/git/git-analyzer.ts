@@ -28,6 +28,7 @@ async function runGit(repoPath: string, args: string[]): Promise<string> {
 export class GitAnalyzer {
   private repoCache = new Map<string, boolean>();
   private commitsCache = new Map<string, GitCommit[]>();
+  private gitRootCache = new Map<string, string | null>();
 
   async isGitRepo(projectPath: string): Promise<boolean> {
     if (this.repoCache.has(projectPath)) return this.repoCache.get(projectPath)!;
@@ -37,10 +38,49 @@ export class GitAnalyzer {
     return isRepo;
   }
 
+  /**
+   * Resolve the actual git root for a path.
+   * If the path doesn't exist or isn't a repo, walk up parent dirs to find one.
+   * Returns null if no git repo found.
+   */
+  async resolveGitRoot(projectPath: string): Promise<string | null> {
+    if (this.gitRootCache.has(projectPath)) return this.gitRootCache.get(projectPath)!;
+
+    // Try the direct path first
+    const toplevel = await runGit(projectPath, ["rev-parse", "--show-toplevel"]);
+    if (toplevel) {
+      this.gitRootCache.set(projectPath, toplevel);
+      return toplevel;
+    }
+
+    // Path doesn't exist or isn't a git repo — walk up parent directories
+    const parts = projectPath.split("/").filter(Boolean);
+    for (let i = parts.length - 1; i >= 2; i--) {
+      const candidate = "/" + parts.slice(0, i).join("/");
+      const result = await runGit(candidate, ["rev-parse", "--show-toplevel"]);
+      if (result) {
+        this.gitRootCache.set(projectPath, result);
+        return result;
+      }
+    }
+
+    this.gitRootCache.set(projectPath, null);
+    return null;
+  }
+
   async getBranches(projectPath: string): Promise<string[]> {
     const output = await runGit(projectPath, ["branch", "--list", "--format=%(refname:short)"]);
     if (!output) return [];
     return output.split("\n").filter(Boolean);
+  }
+
+  /**
+   * Get the current branch name (what HEAD points to).
+   * Returns null if detached HEAD or not a repo.
+   */
+  async getCurrentBranch(projectPath: string): Promise<string | null> {
+    const result = await runGit(projectPath, ["symbolic-ref", "--short", "HEAD"]);
+    return result || null;
   }
 
   async getCommits(
