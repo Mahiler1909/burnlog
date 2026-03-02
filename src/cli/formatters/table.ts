@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import Table from "cli-table3";
-import type { Session, CostBreakdown } from "../../data/models.js";
+import type { Session, CostBreakdown, BranchWork, WasteSignal } from "../../data/models.js";
 import { totalTokens } from "../../core/token-ledger.js";
 import { getModelDisplayName } from "../../utils/pricing-tables.js";
 
@@ -277,5 +277,177 @@ export function renderSessionDetail(session: Session): void {
     console.log(exTable.toString());
   }
 
+  console.log();
+}
+
+export function renderBranchDetail(bw: BranchWork): void {
+  const linesAdded = bw.commits.reduce((s, c) => s + c.linesAdded, 0);
+  const linesRemoved = bw.commits.reduce((s, c) => s + c.linesRemoved, 0);
+  const totalLines = linesAdded + linesRemoved;
+  const days = Math.max(1, Math.round((bw.timeSpan.end.getTime() - bw.timeSpan.start.getTime()) / 86400000));
+
+  console.log();
+  console.log(chalk.bold(`Branch: ${bw.branchName}`));
+  console.log(chalk.dim(`Project: ${bw.projectPath}`));
+  console.log(chalk.dim("═".repeat(60)));
+  console.log(`  Cost:           ${chalk.bold.green(formatCurrency(bw.totalCostUSD))}          Commits:     ${bw.commits.length}`);
+  console.log(`  Sessions:       ${bw.sessions.length}               Lines:       +${linesAdded} / -${linesRemoved}`);
+  console.log(`  Duration:       ${days} days            Cost/Commit: ${bw.commits.length > 0 ? formatCurrency(bw.costPerCommit) : "—"}`);
+  console.log(`  Waste Ratio:    ${Math.round(bw.wasteRatio * 100)}%              Cost/Line:   ${totalLines > 0 ? "$" + bw.costPerLineChanged.toFixed(3) : "—"}`);
+  console.log();
+
+  // Sessions table
+  const sessTable = new Table({
+    head: ["ID", "Date", "Cost", "Outcome", "Summary"].map((h) => chalk.cyan(h)),
+    style: { head: [], border: [] },
+    colWidths: [10, 12, 10, 10, 40],
+    wordWrap: true,
+  });
+
+  for (const s of bw.sessions) {
+    sessTable.push([
+      s.id.slice(0, 8),
+      s.startTime.toISOString().slice(0, 10),
+      formatCurrency(s.estimatedCostUSD),
+      outcomeIcon(s.outcome),
+      (s.summary || s.firstPrompt).slice(0, 38),
+    ]);
+  }
+
+  console.log(chalk.bold("Sessions"));
+  console.log(sessTable.toString());
+  console.log();
+
+  // Commits table
+  if (bw.commits.length > 0) {
+    const commitTable = new Table({
+      head: ["Hash", "Date", "+/-", "Message"].map((h) => chalk.cyan(h)),
+      style: { head: [], border: [] },
+      colWidths: [10, 12, 14, 46],
+      wordWrap: true,
+    });
+
+    for (const c of bw.commits) {
+      commitTable.push([
+        c.hash.slice(0, 8),
+        c.timestamp.toISOString().slice(0, 10),
+        `+${c.linesAdded} / -${c.linesRemoved}`,
+        c.message.slice(0, 44),
+      ]);
+    }
+
+    console.log(chalk.bold("Commits"));
+    console.log(commitTable.toString());
+  } else {
+    console.log(chalk.dim("  No git commits found for this branch."));
+  }
+
+  console.log();
+}
+
+export function renderWasteReport(signals: WasteSignal[], sessions: Session[], periodLabel: string): void {
+  const totalSpend = sessions.reduce((s, x) => s + x.estimatedCostUSD, 0);
+  const totalWaste = signals.reduce((s, x) => s + x.estimatedWastedCostUSD, 0);
+  const wastePct = totalSpend > 0 ? ((totalWaste / totalSpend) * 100).toFixed(1) : "0.0";
+
+  const byType = new Map<string, { cost: number; count: number }>();
+  for (const sig of signals) {
+    const entry = byType.get(sig.type) ?? { cost: 0, count: 0 };
+    entry.cost += sig.estimatedWastedCostUSD;
+    entry.count++;
+    byType.set(sig.type, entry);
+  }
+
+  const topType = [...byType.entries()].sort((a, b) => b[1].cost - a[1].cost)[0];
+
+  console.log();
+  console.log(chalk.bold(`Burnlog Waste Report (${periodLabel})`));
+  console.log(chalk.dim("═".repeat(60)));
+  console.log(`  Total Spend:      ${chalk.bold.green(formatCurrency(totalSpend))}`);
+  console.log(`  Estimated Waste:  ${chalk.bold.red(formatCurrency(totalWaste))} (${wastePct}%)`);
+  if (topType) {
+    console.log(`  Top Waste Type:   ${topType[0]} (${formatCurrency(topType[1].cost)})`);
+  }
+  console.log();
+
+  if (signals.length === 0) {
+    console.log(chalk.green("  No waste signals detected."));
+    console.log();
+    return;
+  }
+
+  const typeTable = new Table({
+    head: ["Type", "Wasted", "Count", "% of Waste"].map((h) => chalk.cyan(h)),
+    style: { head: [], border: [] },
+  });
+
+  for (const [type, data] of [...byType.entries()].sort((a, b) => b[1].cost - a[1].cost)) {
+    const pct = totalWaste > 0 ? ((data.cost / totalWaste) * 100).toFixed(1) : "0.0";
+    typeTable.push([type, formatCurrency(data.cost), data.count.toString(), `${pct}%`]);
+  }
+
+  console.log(chalk.bold("By Waste Type"));
+  console.log(typeTable.toString());
+  console.log();
+
+  const sigTable = new Table({
+    head: ["Session", "Type", "Wasted", "Description"].map((h) => chalk.cyan(h)),
+    style: { head: [], border: [] },
+    colWidths: [10, 24, 10, 40],
+    wordWrap: true,
+  });
+
+  for (const sig of signals.slice(0, 5)) {
+    sigTable.push([
+      sig.sessionId.slice(0, 8),
+      sig.type,
+      formatCurrency(sig.estimatedWastedCostUSD),
+      sig.description.slice(0, 38),
+    ]);
+  }
+
+  console.log(chalk.bold("Top Waste Signals"));
+  console.log(sigTable.toString());
+  console.log();
+
+  console.log(chalk.bold("Tips"));
+  const seenTypes = new Set<string>();
+  for (const sig of signals) {
+    if (seenTypes.has(sig.type)) continue;
+    seenTypes.add(sig.type);
+    console.log(`  ${chalk.yellow("!")} ${chalk.bold(sig.type)}: ${sig.suggestion}`);
+  }
+  console.log();
+}
+
+export function renderBranchComparison(a: BranchWork | null, b: BranchWork | null): void {
+  const nameA = a?.branchName || "(none)";
+  const nameB = b?.branchName || "(none)";
+
+  console.log();
+  console.log(chalk.bold("Branch Comparison"));
+  console.log(chalk.dim("═".repeat(60)));
+
+  const metric = (label: string, valA: string, valB: string) => [chalk.bold(label), valA, valB];
+  const lA = a ? a.commits.reduce((s, c) => s + c.linesAdded, 0) : 0;
+  const lrA = a ? a.commits.reduce((s, c) => s + c.linesRemoved, 0) : 0;
+  const lB = b ? b.commits.reduce((s, c) => s + c.linesAdded, 0) : 0;
+  const lrB = b ? b.commits.reduce((s, c) => s + c.linesRemoved, 0) : 0;
+
+  const table = new Table({
+    head: ["", chalk.cyan(nameA.slice(0, 25)), chalk.cyan(nameB.slice(0, 25))],
+    style: { head: [], border: [] },
+    colWidths: [14, 26, 26],
+  });
+
+  table.push(metric("Sessions", String(a?.sessions.length ?? 0), String(b?.sessions.length ?? 0)));
+  table.push(metric("Commits", String(a?.commits.length ?? 0), String(b?.commits.length ?? 0)));
+  table.push(metric("Cost", a ? formatCurrency(a.totalCostUSD) : "—", b ? formatCurrency(b.totalCostUSD) : "—"));
+  table.push(metric("Cost/Commit", a && a.commits.length > 0 ? formatCurrency(a.costPerCommit) : "—", b && b.commits.length > 0 ? formatCurrency(b.costPerCommit) : "—"));
+  table.push(metric("Lines", lA + lrA > 0 ? `+${lA}/-${lrA}` : "—", lB + lrB > 0 ? `+${lB}/-${lrB}` : "—"));
+  table.push(metric("Cost/Line", a && a.costPerLineChanged > 0 ? "$" + a.costPerLineChanged.toFixed(3) : "—", b && b.costPerLineChanged > 0 ? "$" + b.costPerLineChanged.toFixed(3) : "—"));
+  table.push(metric("Waste", a ? `${Math.round(a.wasteRatio * 100)}%` : "—", b ? `${Math.round(b.wasteRatio * 100)}%` : "—"));
+
+  console.log(table.toString());
   console.log();
 }

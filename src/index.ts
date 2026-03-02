@@ -4,6 +4,9 @@ import { Command } from "commander";
 import { reportCommand } from "./cli/commands/report.js";
 import { sessionsCommand } from "./cli/commands/sessions.js";
 import { sessionCommand } from "./cli/commands/session.js";
+import { branchCommand } from "./cli/commands/branch.js";
+import { wasteCommand } from "./cli/commands/waste.js";
+import { compareCommand } from "./cli/commands/compare.js";
 
 const program = new Command();
 
@@ -31,5 +34,23 @@ program
   .command("session <id>")
   .description("Deep dive into a single session")
   .action(sessionCommand);
+
+program
+  .command("branch <name>")
+  .description("Cost breakdown for a feature branch")
+  .option("--project <path>", "Filter by project name or path")
+  .action(branchCommand);
+
+program
+  .command("waste")
+  .description("Detect wasted token spend with actionable tips")
+  .option("-p, --period <period>", "Time period (e.g., 7d, 30d, 90d)", "30d")
+  .option("--project <path>", "Filter by project name or path")
+  .action(wasteCommand);
+
+program
+  .command("compare <branchA> <branchB>")
+  .description("Compare efficiency between two branches")
+  .action(compareCommand);
 
 program.parse();

@@ -134,6 +134,18 @@ export type WasteType =
   | "excessive_exploration"
   | "error_cascade";
 
+export type MatchStrategy = "branch_name" | "temporal" | "file_overlap" | "none";
+
+export interface MatchQuality {
+  strategy: MatchStrategy;
+  confidence: number; // 0.0 - 1.0
+}
+
+export interface CorrelationResult {
+  branchWork: BranchWork[];
+  unmatchedSessions: Session[];
+}
+
 export interface CostBreakdown {
   byProject: Record<string, number>;
   byBranch: Record<string, number>;
