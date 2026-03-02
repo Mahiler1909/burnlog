@@ -159,7 +159,7 @@ export function renderSessionsList(sessions: Session[]): void {
       chalk.cyan(h),
     ),
     style: { head: [], border: [] },
-    colWidths: [10, 12, 20, 16, 8, 10, 10, 36],
+    colWidths: [10, 12, 20, 16, 10, 10, 10, 34],
     wordWrap: true,
   });
 
@@ -204,7 +204,19 @@ export function renderSessionDetail(session: Session): void {
   console.log(`  Interrups: ${session.userInterruptions}`);
 
   if (Object.keys(session.toolCounts).length > 0) {
-    console.log(`  Tools:     ${Object.entries(session.toolCounts).map(([k, v]) => `${k}:${v}`).join(", ")}`);
+    // Simplify MCP tool names and sort by count
+    const simplified = Object.entries(session.toolCounts)
+      .map(([k, v]) => {
+        const name = k
+          .replace(/^mcp__claude-in-chrome__/, "chrome:")
+          .replace(/^mcp__atlassian__/, "jira:")
+          .replace(/^mcp__figma__/, "figma:")
+          .replace(/^mcp__jetbrains__/, "jetbrains:")
+          .replace(/^mcp__/, "mcp:");
+        return [name, v] as [string, number];
+      })
+      .sort((a, b) => b[1] - a[1]);
+    console.log(`  Tools:     ${simplified.map(([k, v]) => `${k}:${v}`).join(", ")}`);
   }
   if (Object.keys(session.languages).length > 0) {
     console.log(`  Languages: ${Object.entries(session.languages).map(([k, v]) => `${k}:${v}`).join(", ")}`);

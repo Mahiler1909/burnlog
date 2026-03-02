@@ -25,6 +25,7 @@ export interface JSONLActivityStats {
   filesRead: Set<string>;
   editCount: number;
   writeCount: number;
+  toolCounts: Record<string, number>;
 }
 
 export type ExchangeCategory =
@@ -234,4 +235,11 @@ export interface RawJSONLMessage {
   uuid?: string;
   parentUuid?: string | null;
   isSidechain?: boolean;
+  // Compact/meta markers
+  isCompactSummary?: boolean;
+  isMeta?: boolean;
+  compactMetadata?: {
+    trigger: "auto" | "manual";
+    preTokens: number;
+  };
 }

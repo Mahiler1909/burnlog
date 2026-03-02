@@ -46,10 +46,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
       const s = await stat(projectDir).catch(() => null);
       if (!s?.isDirectory()) continue;
 
-      const indexPath = join(projectDir, "sessions-index.json");
-      const indexData = await this.readJSON<RawSessionIndex>(indexPath);
-
-      const originalPath = indexData?.originalPath ?? this.decodePath(encodedPath);
+      const originalPath = await this.resolveProjectPath(encodedPath);
       projects.push({
         id: encodedPath,
         path: originalPath,
@@ -71,12 +68,12 @@ export class ClaudeCodeProvider implements AIToolProvider {
 
     const sessions: Session[] = [];
     const indexedSessionIds = new Set<string>();
-    const originalPath = indexData?.originalPath || this.decodePath(projectEncodedPath);
+    const originalPath = await this.resolveProjectPath(projectEncodedPath);
 
     // 1. Load sessions from index
     if (indexData) {
       for (const entry of indexData.entries) {
-        const entryPath = indexData.originalPath || entry.projectPath || this.decodePath(projectEncodedPath);
+        const entryPath = indexData.originalPath || entry.projectPath || originalPath;
         const session = await this.buildSession(entry, entryPath);
         if (session) sessions.push(session);
         indexedSessionIds.add(entry.sessionId);
@@ -114,7 +111,8 @@ export class ClaudeCodeProvider implements AIToolProvider {
       if (session) sessions.push(session);
     }
 
-    return sessions;
+    // Filter out empty/ghost sessions (no JSONL data, no tokens, no messages)
+    return sessions.filter((s) => s.exchanges.length > 0 || s.messageCount > 0);
   }
 
   async loadAllSessions(): Promise<Session[]> {
@@ -203,7 +201,8 @@ export class ClaudeCodeProvider implements AIToolProvider {
       sessionType: facets?.session_type || "unknown",
       frictions,
 
-      toolCounts: meta?.tool_counts || {},
+      // Prefer JSONL-derived tool counts (session-meta undercounts after /compact)
+      toolCounts: Object.keys(activity.toolCounts).length > 0 ? activity.toolCounts : (meta?.tool_counts || {}),
       languages: meta?.languages || {},
       // Prefer JSONL-derived activity stats (accurate across /compact boundaries)
       // Fallback to session-meta only when JSONL has no data
@@ -228,7 +227,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
       return {
         exchanges: [],
         gitBranch: "",
-        activity: { linesAdded: 0, linesRemoved: 0, filesModified: new Set(), filesRead: new Set(), editCount: 0, writeCount: 0 },
+        activity: { linesAdded: 0, linesRemoved: 0, filesModified: new Set(), filesRead: new Set(), editCount: 0, writeCount: 0, toolCounts: {} },
       };
     }
 
@@ -246,6 +245,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
       filesRead: new Set(),
       editCount: 0,
       writeCount: 0,
+      toolCounts: {},
     };
 
     for (const line of lines) {
@@ -261,14 +261,27 @@ export class ClaudeCodeProvider implements AIToolProvider {
         gitBranch = msg.gitBranch;
       }
 
+      // Skip non-conversation messages
+      if (msg.type === "system" || msg.type === "summary" || msg.type === "file-history-snapshot" || msg.type === "progress") {
+        continue;
+      }
+
       if (msg.type === "user") {
+        // Skip synthetic/meta messages that are not real user prompts
+        if (msg.isCompactSummary || msg.isMeta) continue;
+
         // Extract user prompt text from various formats
         const rawContent = (msg as any).message?.content ?? msg.content;
         if (typeof rawContent === "string") {
-          // Skip system/meta messages, keep actual user prompts
-          if (!rawContent.startsWith("<local-command") && !rawContent.startsWith("<task-notification")) {
-            currentUserPrompt = this.truncate(rawContent, 200);
+          // Skip system/command/output messages, keep actual user prompts
+          if (
+            rawContent.startsWith("<local-command") ||
+            rawContent.startsWith("<task-notification") ||
+            rawContent.startsWith("<command-name>")
+          ) {
+            continue;
           }
+          currentUserPrompt = this.truncate(rawContent, 200);
         } else if (Array.isArray(rawContent)) {
           const textParts = rawContent
             .filter((c: any) => c.type === "text" && c.text)
@@ -281,6 +294,9 @@ export class ClaudeCodeProvider implements AIToolProvider {
       if (msg.type === "assistant" && msg.message?.usage) {
         const usage = msg.message.usage;
         const model = msg.message.model || "unknown";
+
+        // Skip synthetic/summary messages (context compression, not real exchanges)
+        if (model.startsWith("<synthetic>") || msg.type === "summary" as any) continue;
         const contentArr = Array.isArray(msg.message.content) ? msg.message.content : [];
 
         const toolsUsed: string[] = [];
@@ -290,6 +306,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
         for (const block of contentArr) {
           if (block.type !== "tool_use" || !block.name) continue;
           toolsUsed.push(block.name);
+          activity.toolCounts[block.name] = (activity.toolCounts[block.name] || 0) + 1;
 
           const input = block.input as Record<string, any> | undefined;
           if (!input) continue;
@@ -338,6 +355,29 @@ export class ClaudeCodeProvider implements AIToolProvider {
           cacheReadTokens: usage.cache_read_input_tokens || 0,
         };
 
+        // If no new user prompt, this is a tool_result continuation of the previous exchange.
+        // Merge tokens, tools, files into the previous exchange instead of creating a new one.
+        if (!currentUserPrompt && exchanges.length > 0) {
+          const prev = exchanges[exchanges.length - 1];
+          prev.tokenUsage.inputTokens += tokenUsage.inputTokens;
+          prev.tokenUsage.outputTokens += tokenUsage.outputTokens;
+          prev.tokenUsage.cacheCreationTokens += tokenUsage.cacheCreationTokens;
+          prev.tokenUsage.cacheReadTokens += tokenUsage.cacheReadTokens;
+          prev.estimatedCostUSD += calculateCost(tokenUsage, model);
+          for (const t of toolsUsed) {
+            if (!prev.toolsUsed.includes(t)) prev.toolsUsed.push(t);
+          }
+          for (const f of filesRead) {
+            if (!prev.filesRead.includes(f)) prev.filesRead.push(f);
+          }
+          for (const f of filesModified) {
+            if (!prev.filesModified.includes(f)) prev.filesModified.push(f);
+          }
+          // Re-classify with merged tool list
+          prev.category = this.classifyExchange(prev.toolsUsed, prev.userPrompt);
+          continue;
+        }
+
         const category = this.classifyExchange(toolsUsed, currentUserPrompt);
 
         exchanges.push({
@@ -365,12 +405,51 @@ export class ClaudeCodeProvider implements AIToolProvider {
 
     const editTools = ["Edit", "Write", "NotebookEdit"];
     const readTools = ["Read", "Glob", "Grep"];
+    const metaTools = [
+      "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput",
+      "AskUserQuestion", "ExitPlanMode", "EnterPlanMode", "EnterWorktree",
+    ];
 
-    const hasEdits = toolsUsed.some((t) => editTools.includes(t));
-    const hasOnlyReads = toolsUsed.every((t) => readTools.includes(t) || t === "Bash" || t === "Agent");
+    // Filter out meta/orchestration tools for classification
+    const actionTools = toolsUsed.filter((t) => !metaTools.includes(t));
+    if (actionTools.length === 0) return "planning";
+
+    const hasEdits = actionTools.some((t) => editTools.includes(t));
+    // MCP tools that are read-only / exploratory
+    const isReadOnlyMCP = (t: string) => {
+      if (!t.startsWith("mcp__")) return false;
+      // Chrome read-only actions
+      if (t.startsWith("mcp__claude-in-chrome__read")) return true;
+      if (t.startsWith("mcp__claude-in-chrome__tabs")) return true;
+      if (t.startsWith("mcp__claude-in-chrome__find")) return true;
+      if (t.startsWith("mcp__claude-in-chrome__get")) return true;
+      // Known read-only MCP providers
+      if (t.startsWith("mcp__atlassian__")) return true;
+      if (t.startsWith("mcp__figma__")) return true;
+      // Generic MCP read patterns
+      if (t.includes("get_") || t.includes("list_") || t.includes("read_") || t.includes("search_") || t.includes("find_")) return true;
+      return false;
+    };
+
+    const isExploration = actionTools.every((t) =>
+      readTools.includes(t) ||
+      t === "Bash" ||
+      t === "Agent" ||
+      t === "WebSearch" ||
+      t === "WebFetch" ||
+      isReadOnlyMCP(t),
+    );
 
     if (hasEdits) return "implementation";
-    if (hasOnlyReads) return "exploration";
+    if (isExploration) return "exploration";
+
+    // MCP browser actions (click, navigate, type) without edits = debugging/testing
+    const hasBrowserActions = actionTools.some((t) =>
+      t.startsWith("mcp__claude-in-chrome__computer") ||
+      t.startsWith("mcp__claude-in-chrome__navigate") ||
+      t.startsWith("mcp__claude-in-chrome__form"),
+    );
+    if (hasBrowserActions) return "debugging";
 
     return "implementation";
   }
@@ -406,8 +485,95 @@ export class ClaudeCodeProvider implements AIToolProvider {
     }
   }
 
-  private decodePath(encoded: string): string {
-    return encoded.replace(/-/g, "/");
+  /**
+   * Resolve the real project path from an encoded directory name.
+   * Strategy: check session-meta and JSONL for actual paths, fallback to
+   * filesystem probing, then encoded path as last resort.
+   */
+  private async resolveProjectPath(encodedPath: string): Promise<string> {
+    const projectDir = join(PROJECTS_DIR, encodedPath);
+
+    // 1. Check sessions-index originalPath
+    const indexPath = join(projectDir, "sessions-index.json");
+    const indexData = await this.readJSON<RawSessionIndex>(indexPath);
+    if (indexData?.originalPath) return indexData.originalPath;
+
+    // 2. Check session-meta for any session in this project
+    await this.ensureCaches();
+    if (this.metaCache) {
+      for (const meta of this.metaCache.values()) {
+        if (meta.project_path) {
+          // Match by checking if the encoded path corresponds to this meta path
+          const metaEncoded = meta.project_path.replace(/\//g, "-").replace(/^-/, "-");
+          if (encodedPath === metaEncoded || meta.project_path.endsWith(this.lastPathSegments(encodedPath))) {
+            return meta.project_path;
+          }
+        }
+      }
+    }
+
+    // 3. Check first JSONL file for cwd
+    const files = await readdir(projectDir).catch(() => []);
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      const firstLine = await this.readFirstLine(join(projectDir, file));
+      if (firstLine) {
+        try {
+          const msg = JSON.parse(firstLine);
+          if (msg.cwd) return msg.cwd;
+        } catch { /* ignore */ }
+      }
+      break; // only check first JSONL
+    }
+
+    // 4. Try filesystem probing: walk from the root trying to find a real path
+    const parts = encodedPath.replace(/^-/, "").split("-");
+    let current = "/";
+    for (let i = 0; i < parts.length; i++) {
+      const candidates = [parts[i]];
+      // Try joining with next parts using hyphens
+      for (let j = i + 1; j < parts.length; j++) {
+        candidates.push(parts.slice(i, j + 1).join("-"));
+      }
+      // Try longest match first
+      let found = false;
+      for (const candidate of candidates.reverse()) {
+        const testPath = join(current, candidate);
+        const s = await stat(testPath).catch(() => null);
+        if (s?.isDirectory()) {
+          current = testPath;
+          i += candidate.split("-").length - 1;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        current = join(current, parts[i]);
+      }
+    }
+    if (current !== "/") {
+      const s = await stat(current).catch(() => null);
+      if (s?.isDirectory()) return current;
+    }
+
+    // 5. Fallback: naive decode
+    return "/" + encodedPath.replace(/^-/, "").replace(/-/g, "/");
+  }
+
+  private lastPathSegments(encoded: string): string {
+    // Get last 2-3 meaningful segments for matching
+    const parts = encoded.replace(/^-/, "").split("-");
+    return parts.slice(-3).join("-");
+  }
+
+  private async readFirstLine(filePath: string): Promise<string | null> {
+    try {
+      const content = await readFile(filePath, "utf-8");
+      const newlineIdx = content.indexOf("\n");
+      return newlineIdx > 0 ? content.slice(0, newlineIdx) : content;
+    } catch {
+      return null;
+    }
   }
 
   private truncate(str: string, max: number): string {
