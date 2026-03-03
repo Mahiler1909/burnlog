@@ -1,10 +1,13 @@
 import { ClaudeCodeProvider } from "../../providers/claude-code/provider.js";
 import { renderSessionsList } from "../formatters/table.js";
+import { outputAs, type OutputFormat } from "../formatters/export.js";
+import { totalTokens } from "../../core/token-ledger.js";
 
 export async function sessionsCommand(options: {
   project?: string;
   sort?: string;
   limit?: string;
+  format?: string;
 }): Promise<void> {
   const provider = new ClaudeCodeProvider();
   let sessions = await provider.loadAllSessions();
@@ -29,19 +32,7 @@ export async function sessionsCommand(options: {
       sessions.sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
       break;
     case "tokens":
-      sessions.sort((a, b) => {
-        const ta =
-          a.tokenUsage.inputTokens +
-          a.tokenUsage.outputTokens +
-          a.tokenUsage.cacheCreationTokens +
-          a.tokenUsage.cacheReadTokens;
-        const tb =
-          b.tokenUsage.inputTokens +
-          b.tokenUsage.outputTokens +
-          b.tokenUsage.cacheCreationTokens +
-          b.tokenUsage.cacheReadTokens;
-        return tb - ta;
-      });
+      sessions.sort((a, b) => totalTokens(a.tokenUsage) - totalTokens(b.tokenUsage));
       break;
   }
 
@@ -54,8 +45,23 @@ export async function sessionsCommand(options: {
     return;
   }
 
-  console.log();
-  console.log(`Showing ${sessions.length} sessions (sorted by ${sortBy}):`);
-  console.log();
-  renderSessionsList(sessions);
+  const format = (options.format || "table") as OutputFormat;
+
+  const data = sessions.map((s) => ({
+    id: s.id.slice(0, 8),
+    date: s.startTime.toISOString().slice(0, 10),
+    project: s.projectName,
+    branch: s.gitBranch,
+    cost: Math.round(s.estimatedCostUSD * 100) / 100,
+    tokens: totalTokens(s.tokenUsage),
+    outcome: s.outcome,
+    summary: s.summary,
+  }));
+
+  outputAs(format, data, () => {
+    console.log();
+    console.log(`Showing ${sessions.length} sessions (sorted by ${sortBy}):`);
+    console.log();
+    renderSessionsList(sessions);
+  });
 }

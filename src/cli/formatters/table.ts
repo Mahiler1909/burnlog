@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import Table from "cli-table3";
-import type { Session, CostBreakdown, BranchWork, WasteSignal } from "../../data/models.js";
+import type { Session, CostBreakdown, BranchWork, WasteSignal, GitCommit } from "../../data/models.js";
 import { totalTokens } from "../../core/token-ledger.js";
 import { getModelDisplayName } from "../../utils/pricing-tables.js";
 
@@ -29,11 +29,13 @@ function outcomeIcon(outcome: string): string {
   }
 }
 
-export function renderReportHeader(sessions: Session[], periodLabel: string): void {
+export function renderReportHeader(sessions: Session[], periodLabel: string, commitsByProject?: Map<string, number>): void {
   const totalCost = sessions.reduce((sum, s) => sum + s.estimatedCostUSD, 0);
   const totalSessions = sessions.length;
   const projects = new Set(sessions.map((s) => s.projectName)).size;
-  const totalCommits = sessions.reduce((sum, s) => sum + s.gitCommits, 0);
+  const totalCommits = commitsByProject
+    ? [...commitsByProject.values()].reduce((sum, c) => sum + c, 0)
+    : sessions.reduce((sum, s) => sum + s.gitCommits, 0);
 
   console.log();
   console.log(chalk.bold(`Burnlog Report (${periodLabel})`));
@@ -47,7 +49,7 @@ export function renderReportHeader(sessions: Session[], periodLabel: string): vo
   console.log();
 }
 
-export function renderByProject(sessions: Session[]): void {
+export function renderByProject(sessions: Session[], commitsByProject?: Map<string, number>): void {
   const grouped = new Map<string, Session[]>();
   for (const s of sessions) {
     const list = grouped.get(s.projectName) ?? [];
@@ -56,7 +58,7 @@ export function renderByProject(sessions: Session[]): void {
   }
 
   const table = new Table({
-    head: ["Project", "Cost", "Sessions", "Commits", "Lines +/-", "Outcome"].map((h) =>
+    head: ["Project", "Cost", "Sessions", "Commits", "Lines +/-", "$/Commit", "$/Line", "Outcome"].map((h) =>
       chalk.cyan(h),
     ),
     style: { head: [], border: [] },
@@ -70,10 +72,14 @@ export function renderByProject(sessions: Session[]): void {
 
   for (const [name, projectSessions] of sorted) {
     const cost = projectSessions.reduce((s, x) => s + x.estimatedCostUSD, 0);
-    const commits = projectSessions.reduce((s, x) => s + x.gitCommits, 0);
+    const commits = commitsByProject ? (commitsByProject.get(name) ?? 0) : projectSessions.reduce((s, x) => s + x.gitCommits, 0);
     const linesAdded = projectSessions.reduce((s, x) => s + x.linesAdded, 0);
     const linesRemoved = projectSessions.reduce((s, x) => s + x.linesRemoved, 0);
+    const totalLines = linesAdded + linesRemoved;
     const achieved = projectSessions.filter((x) => x.outcome === "fully_achieved").length;
+
+    const costPerCommit = commits > 0 ? formatCurrency(cost / commits) : "—";
+    const costPerLine = totalLines > 0 ? "$" + (cost / totalLines).toFixed(3) : "—";
 
     table.push([
       name,
@@ -81,6 +87,8 @@ export function renderByProject(sessions: Session[]): void {
       projectSessions.length.toString(),
       commits.toString(),
       `+${linesAdded} / -${linesRemoved}`,
+      costPerCommit,
+      costPerLine,
       `${achieved}/${projectSessions.length}`,
     ]);
   }
@@ -154,12 +162,21 @@ export function renderByOutcome(breakdown: CostBreakdown): void {
 }
 
 export function renderSessionsList(sessions: Session[]): void {
+  const termWidth = process.stdout.columns || 120;
+  // Fixed columns: ID(10) + Date(12) + Cost(10) + Tokens(10) + Outcome(9) + borders(~25) = ~76
+  const fixedWidth = 76;
+  const flexWidth = Math.max(termWidth - fixedWidth, 60);
+  // Distribute flex space: project 18%, branch 35%, summary 47%
+  const projectW = Math.max(Math.floor(flexWidth * 0.18), 14);
+  const branchW = Math.max(Math.floor(flexWidth * 0.35), 20);
+  const summaryW = Math.max(flexWidth - projectW - branchW, 20);
+
   const table = new Table({
     head: ["ID", "Date", "Project", "Branch", "Cost", "Tokens", "Outcome", "Summary"].map((h) =>
       chalk.cyan(h),
     ),
     style: { head: [], border: [] },
-    colWidths: [10, 12, 20, 16, 10, 10, 10, 34],
+    colWidths: [10, 12, projectW, branchW, 10, 10, 9, summaryW],
     wordWrap: true,
   });
 
@@ -167,19 +184,98 @@ export function renderSessionsList(sessions: Session[]): void {
     table.push([
       s.id.slice(0, 8),
       s.startTime.toISOString().slice(0, 10),
-      s.projectName.slice(0, 18),
-      (s.gitBranch || "—").slice(0, 14),
+      truncate(s.projectName, projectW - 2),
+      truncate(s.gitBranch || "—", branchW - 2),
       s.estimatedCostUSD > 0 ? formatCurrency(s.estimatedCostUSD) : chalk.dim("n/a"),
       totalTokens(s.tokenUsage) > 0 ? formatTokens(totalTokens(s.tokenUsage)) : chalk.dim("n/a"),
       outcomeIcon(s.outcome),
-      (s.summary || s.firstPrompt).slice(0, 34),
+      (s.summary || s.firstPrompt) || "—",
     ]);
   }
 
   console.log(table.toString());
 }
 
-export function renderSessionDetail(session: Session): void {
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max - 1) + "…";
+}
+
+function cleanPromptForDisplay(raw: string): string {
+  if (!raw || raw.length < 80) return raw;
+
+  // 1. Strip XML-like tags and their content
+  let text = raw.replace(/<(bash-stdout|bash-stderr|task-notification|system-reminder|command-name|command-message|local-command-stdout)[^>]*>[\s\S]*?<\/\1>/gi, (_match, tag) => {
+    return chalk.dim(`[${tag} collapsed]`);
+  });
+
+  // 2. Collapse consecutive "noise" lines (paths, errors, indented output, table borders)
+  const lines = text.split("\n");
+  const result: string[] = [];
+  let noiseBuffer: string[] = [];
+
+  const isNoise = (line: string): boolean => {
+    const t = line.trim();
+    if (!t) return noiseBuffer.length > 0; // blank line is noise only if inside a noise block
+    return (
+      /^[│├└┌┬┼─╰╭╮╯┐┤┴╰╮]+/.test(t) ||
+      /^\/Users\//.test(t) ||
+      /^-Users-/.test(t) ||
+      /^\s*sessions:\s*\d+/.test(t) ||
+      /^\s*last active:/.test(t) ||
+      /^(Error|Warning|note|hint|Traceback|×):?\s/.test(t) ||
+      /^\s{6,}/.test(line) ||
+      /^(Old|To|Done|Changes|Read more):?\s/.test(t) ||
+      /^\s*at\s+/.test(t) ||
+      /^\s*python3?\s/.test(t) ||
+      /^\s*source\s/.test(t) ||
+      /^\s*brew\s/.test(t) ||
+      /^\s*If you/.test(t)
+    );
+  };
+
+  const flushNoise = () => {
+    if (noiseBuffer.length > 3) {
+      result.push(chalk.dim(`[... ${noiseBuffer.length} lines of pasted output ...]`));
+    } else {
+      result.push(...noiseBuffer);
+    }
+    noiseBuffer = [];
+  };
+
+  for (const line of lines) {
+    if (isNoise(line)) {
+      noiseBuffer.push(line);
+    } else {
+      flushNoise();
+      result.push(line);
+    }
+  }
+  flushNoise();
+
+  return result.join("\n").trim();
+}
+
+function wrapIndented(text: string, indent: number): string {
+  const width = (process.stdout.columns || 100) - indent;
+  if (text.length <= width) return text;
+  const pad = " ".repeat(indent);
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (current && (current.length + 1 + word.length) > width) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current ? current + " " + word : word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.join("\n" + pad);
+}
+
+export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal[], commits?: GitCommit[]): void {
   console.log();
   console.log(chalk.bold(`Session: ${session.id}`));
   console.log(chalk.dim("═".repeat(60)));
@@ -190,7 +286,7 @@ export function renderSessionDetail(session: Session): void {
   console.log(`Messages:   ${session.messageCount}`);
   console.log(`Cost:       ${chalk.bold.green(formatCurrency(session.estimatedCostUSD))}`);
   console.log(`Outcome:    ${outcomeIcon(session.outcome)} ${session.outcome}`);
-  console.log(`Goal:       ${session.goal || "—"}`);
+  console.log(`Goal:       ${wrapIndented(session.goal || "—", 12)}`);
   console.log(`Category:   ${session.goalCategory}`);
   console.log(`Type:       ${session.sessionType}`);
   console.log();
@@ -199,7 +295,7 @@ export function renderSessionDetail(session: Session): void {
   console.log(chalk.bold("Activity"));
   console.log(`  Lines:     +${session.linesAdded} / -${session.linesRemoved}`);
   console.log(`  Files:     ${session.filesModified} modified`);
-  console.log(`  Commits:   ${session.gitCommits}`);
+  console.log(`  Commits:   ${commits?.length ?? session.gitCommits}`);
   console.log(`  Errors:    ${session.toolErrors}`);
   console.log(`  Interrups: ${session.userInterruptions}`);
 
@@ -242,6 +338,38 @@ export function renderSessionDetail(session: Session): void {
     }
   }
 
+  // Waste Signals
+  if (wasteSignals && wasteSignals.length > 0) {
+    console.log();
+    console.log(chalk.bold.red(`Waste Signals (${wasteSignals.length})`));
+    for (const sig of wasteSignals) {
+      console.log(`  ${chalk.red("$")} ${sig.type}: ${sig.description} (${formatCurrency(sig.estimatedWastedCostUSD)} wasted)`);
+      console.log(`    ${chalk.dim(sig.suggestion)}`);
+    }
+  }
+
+  // Correlated Commits
+  if (commits && commits.length > 0) {
+    console.log();
+    console.log(chalk.bold(`Correlated Commits (${commits.length})`));
+    const msgW = Math.max((process.stdout.columns || 100) - 42, 30);
+    const commitTable = new Table({
+      head: ["Hash", "Date", "+/-", "Message"].map((h) => chalk.cyan(h)),
+      style: { head: [], border: [] },
+      colWidths: [10, 12, 14, msgW],
+      wordWrap: true,
+    });
+    for (const c of commits) {
+      commitTable.push([
+        c.hash.slice(0, 8),
+        c.timestamp.toISOString().slice(0, 10),
+        `+${c.linesAdded} / -${c.linesRemoved}`,
+        c.message,
+      ]);
+    }
+    console.log(commitTable.toString());
+  }
+
   // Tokens
   console.log();
   console.log(chalk.bold("Token Usage"));
@@ -255,26 +383,17 @@ export function renderSessionDetail(session: Session): void {
   if (session.exchanges.length > 0) {
     console.log();
     console.log(chalk.bold(`Exchanges (${session.exchanges.length})`));
-
-    const exTable = new Table({
-      head: ["#", "Cost", "Model", "Category", "Tools", "Prompt"].map((h) => chalk.cyan(h)),
-      style: { head: [], border: [] },
-      colWidths: [4, 8, 12, 16, 20, 40],
-      wordWrap: true,
-    });
+    const indent = 14;
 
     for (const ex of session.exchanges) {
-      exTable.push([
-        ex.sequenceNumber.toString(),
-        formatCurrency(ex.estimatedCostUSD),
-        getModelDisplayName(ex.model),
-        ex.category,
-        ex.toolsUsed.slice(0, 3).join(", ") || "—",
-        ex.userPrompt.slice(0, 38) || "—",
-      ]);
+      console.log();
+      console.log(chalk.dim(`  ─── #${ex.sequenceNumber} ───`));
+      console.log(`  Cost:       ${formatCurrency(ex.estimatedCostUSD)}`);
+      console.log(`  Model:      ${getModelDisplayName(ex.model)}`);
+      console.log(`  Category:   ${ex.category}`);
+      console.log(`  Tools:      ${ex.toolsUsed.join(", ") || "—"}`);
+      console.log(`  Prompt:     ${wrapIndented(cleanPromptForDisplay(ex.userPrompt || "—"), indent)}`);
     }
-
-    console.log(exTable.toString());
   }
 
   console.log();
@@ -320,10 +439,11 @@ export function renderBranchDetail(bw: BranchWork, warnings?: string[]): void {
 
   // Commits table
   if (bw.commits.length > 0) {
+    const msgW2 = Math.max((process.stdout.columns || 100) - 42, 30);
     const commitTable = new Table({
       head: ["Hash", "Date", "+/-", "Message"].map((h) => chalk.cyan(h)),
       style: { head: [], border: [] },
-      colWidths: [10, 12, 14, 46],
+      colWidths: [10, 12, 14, msgW2],
       wordWrap: true,
     });
 
@@ -332,7 +452,7 @@ export function renderBranchDetail(bw: BranchWork, warnings?: string[]): void {
         c.hash.slice(0, 8),
         c.timestamp.toISOString().slice(0, 10),
         `+${c.linesAdded} / -${c.linesRemoved}`,
-        c.message.slice(0, 44),
+        c.message,
       ]);
     }
 

@@ -188,21 +188,21 @@ export class ClaudeCodeProvider implements AIToolProvider {
       id: entry.sessionId,
       projectPath: originalPath,
       projectName: basename(originalPath),
-      summary: entry.summary || facets?.brief_summary || "",
-      firstPrompt: this.truncate(entry.firstPrompt, 120),
+      summary: entry.summary || facets?.brief_summary || this.inferSummary(exchanges),
+      firstPrompt: entry.firstPrompt,
       gitBranch: entry.gitBranch || parseResult.gitBranch || "",
       startTime,
       endTime,
       durationMinutes: meta?.duration_minutes ?? Math.round((endTime.getTime() - startTime.getTime()) / 60000),
-      messageCount: entry.messageCount,
+      messageCount: entry.messageCount || exchanges.length * 2,
       isSidechain: entry.isSidechain,
 
       tokenUsage,
       estimatedCostUSD,
 
-      goal: facets?.underlying_goal || "",
-      goalCategory: facets ? Object.keys(facets.goal_categories)[0] || "unknown" : "unknown",
-      outcome: (facets?.outcome as SessionOutcome) || "unknown",
+      goal: facets?.underlying_goal || this.inferGoal(exchanges, parseResult.firstRawPrompt),
+      goalCategory: facets ? Object.keys(facets.goal_categories)[0] || "unknown" : this.inferGoalCategory(exchanges),
+      outcome: (facets?.outcome as SessionOutcome) || this.inferOutcome(exchanges, activity, meta),
       helpfulness: facets?.claude_helpfulness || "unknown",
       sessionType: facets?.session_type || "unknown",
       frictions,
@@ -227,6 +227,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
     exchanges: Exchange[];
     gitBranch: string;
     activity: JSONLActivityStats;
+    firstRawPrompt: string;
   }> {
     const content = await readFile(filePath, "utf-8").catch(() => "");
     if (!content) {
@@ -234,6 +235,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
         exchanges: [],
         gitBranch: "",
         activity: { linesAdded: 0, linesRemoved: 0, filesModified: new Set(), filesRead: new Set(), editCount: 0, writeCount: 0, toolCounts: {} },
+        firstRawPrompt: "",
       };
     }
 
@@ -241,6 +243,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
     const lines = content.split("\n").filter(Boolean);
 
     let currentUserPrompt = "";
+    let firstRawPrompt = "";
     let sequenceNumber = 0;
     let gitBranch = "";
 
@@ -287,12 +290,15 @@ export class ClaudeCodeProvider implements AIToolProvider {
           ) {
             continue;
           }
-          currentUserPrompt = this.truncate(rawContent, 200);
+          currentUserPrompt = rawContent;
+          if (!firstRawPrompt && rawContent.length > 10) firstRawPrompt = rawContent.split(/[\n\r]/)[0].trim();
         } else if (Array.isArray(rawContent)) {
           const textParts = rawContent
             .filter((c: any) => c.type === "text" && c.text)
             .map((c: any) => c.text as string);
-          currentUserPrompt = this.truncate(textParts.join(" "), 200);
+          const joined = textParts.join(" ");
+          currentUserPrompt = joined;
+          if (!firstRawPrompt && joined.length > 10) firstRawPrompt = joined.split(/[\n\r]/)[0].trim();
         }
         continue;
       }
@@ -403,7 +409,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
       }
     }
 
-    return { exchanges, gitBranch, activity };
+    return { exchanges, gitBranch, activity, firstRawPrompt };
   }
 
   private classifyExchange(toolsUsed: string[], _prompt: string): ExchangeCategory {
@@ -580,6 +586,85 @@ export class ClaudeCodeProvider implements AIToolProvider {
     } catch {
       return null;
     }
+  }
+
+  private inferOutcome(
+    exchanges: Exchange[],
+    activity: JSONLActivityStats,
+    meta: RawSessionMeta | undefined,
+  ): SessionOutcome {
+    if (exchanges.length === 0) return "unknown";
+
+    const hasImpl = exchanges.some((e) => e.category === "implementation");
+    const producedChanges = activity.linesAdded > 0 || activity.filesModified.size > 0;
+    const errors = meta?.tool_errors ?? 0;
+    const interruptions = meta?.user_interruptions ?? 0;
+
+    if (hasImpl && producedChanges && errors === 0 && interruptions === 0) {
+      return "fully_achieved";
+    }
+    if (hasImpl && producedChanges && errors === 0) {
+      return "mostly_achieved";
+    }
+    if (hasImpl && producedChanges) {
+      return "partially_achieved";
+    }
+    const totalCost = exchanges.reduce((s, e) => s + e.estimatedCostUSD, 0);
+    if (exchanges.length > 3 && !hasImpl && totalCost > 0.5) {
+      return "not_achieved";
+    }
+    if (errors > 0 && activity.filesModified.size === 0) {
+      return "not_achieved";
+    }
+    return "unknown";
+  }
+
+  private inferSummary(exchanges: Exchange[]): string {
+    if (exchanges.length === 0) return "";
+
+    // Get first user prompt — clean to single line
+    const rawPrompt = exchanges.find((e) => e.userPrompt)?.userPrompt || "";
+    if (!rawPrompt) return "";
+    const firstLine = rawPrompt.split(/[\n\r]/)[0].trim();
+    // Remove common prefixes like slash commands
+    const prompt = firstLine.replace(/^\/\w+\s*/, "").trim() || firstLine;
+
+    // Collect top modified file basenames (deduplicated)
+    const files = new Set<string>();
+    for (const ex of exchanges) {
+      for (const f of ex.filesModified) {
+        const basename = f.split("/").pop() || f;
+        files.add(basename);
+        if (files.size >= 3) break;
+      }
+      if (files.size >= 3) break;
+    }
+
+    const fileStr = files.size > 0 ? ` → ${[...files].join(", ")}` : "";
+    return prompt + fileStr;
+  }
+
+  private inferGoal(exchanges: Exchange[], firstRawPrompt?: string): string {
+    // Prefer firstRawPrompt — captures interrupted prompts that never became exchanges
+    if (firstRawPrompt && firstRawPrompt.length > 20) {
+      return firstRawPrompt;
+    }
+    if (exchanges.length === 0) return "";
+    // Find the first substantive prompt (>20 chars) among the first 5 exchanges
+    const candidates = exchanges.slice(0, 5);
+    const substantive = candidates.find((e) => e.userPrompt.length > 20);
+    return substantive?.userPrompt || candidates[0]?.userPrompt || "";
+  }
+
+  private inferGoalCategory(exchanges: Exchange[]): string {
+    if (exchanges.length === 0) return "unknown";
+    const categories = exchanges.map((e) => e.category);
+    const counts: Record<string, number> = {};
+    for (const c of categories) {
+      counts[c] = (counts[c] || 0) + 1;
+    }
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    return sorted[0]?.[0] || "unknown";
   }
 
   private truncate(str: string, max: number): string {

@@ -37,6 +37,7 @@ export type ExchangeCategory =
 
 export type SessionOutcome =
   | "fully_achieved"
+  | "mostly_achieved"
   | "partially_achieved"
   | "not_achieved"
   | "unknown";
