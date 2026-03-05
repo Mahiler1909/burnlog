@@ -30,15 +30,15 @@
     "developer-tools",
     "ai-analytics"
   ],
-  "author": "Fernando Chullo",
+  "author": "Fernando Mahiler Chullo Mamani",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/fernandochullo/burnlog.git"
+    "url": "git+https://github.com/Mahiler1909/burnlog.git"
   },
-  "homepage": "https://github.com/fernandochullo/burnlog#readme",
+  "homepage": "https://github.com/Mahiler1909/burnlog#readme",
   "bugs": {
-    "url": "https://github.com/fernandochullo/burnlog/issues"
+    "url": "https://github.com/Mahiler1909/burnlog/issues"
   },
   "dependencies": {
     "chalk": "^5.4.1",
