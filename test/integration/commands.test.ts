@@ -82,6 +82,41 @@ describe("sessionsCommand", () => {
     const parsed = JSON.parse(output);
     expect(parsed).toHaveLength(1);
   });
+
+  it("sorts by tokens", async () => {
+    const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
+    await sessionsCommand({ sort: "tokens", format: "json" });
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0].tokens).toBeGreaterThanOrEqual(parsed[1].tokens);
+  });
+
+  it("shows all sessions with --all flag", async () => {
+    const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
+    await sessionsCommand({ all: true, format: "json" });
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed).toHaveLength(2);
+  });
+
+  it("prints message when no sessions found", async () => {
+    testSessions = [];
+    const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
+    await sessionsCommand({ format: "json" });
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("No sessions found");
+  });
+
+  it("outputs CSV format", async () => {
+    const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
+    await sessionsCommand({ format: "csv" });
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("id,date,project,branch,cost,tokens,outcome,summary");
+  });
 });
 
 describe("wasteCommand", () => {
@@ -93,6 +128,15 @@ describe("wasteCommand", () => {
 
   afterEach(() => {
     consoleSpy.mockRestore();
+  });
+
+  it("prints message when no sessions found", async () => {
+    testSessions = [];
+    const { wasteCommand } = await import("../../src/cli/commands/waste.js");
+    await wasteCommand({ format: "json" });
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("No sessions found");
   });
 
   it("detects waste signals in sessions", async () => {
@@ -125,6 +169,15 @@ describe("reportCommand", () => {
 
   afterEach(() => {
     consoleSpy.mockRestore();
+  });
+
+  it("prints message when no sessions found", async () => {
+    testSessions = [];
+    const { reportCommand } = await import("../../src/cli/commands/report.js");
+    await reportCommand({ format: "json" });
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("No sessions found");
   });
 
   it("produces JSON output with summary and breakdowns", async () => {

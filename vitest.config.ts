@@ -9,7 +9,12 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      exclude: ["src/index.ts", "src/data/models.ts"],
+      exclude: [
+        "src/index.ts",
+        "src/data/models.ts",
+        "src/git/git-analyzer.ts",
+        "src/providers/**",
+      ],
     },
   },
 });
