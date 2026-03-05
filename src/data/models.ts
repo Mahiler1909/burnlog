@@ -138,13 +138,6 @@ export type WasteType =
   | "high_cost_per_line"
   | "stalled_exploration";
 
-export type MatchStrategy = "branch_name" | "temporal" | "file_overlap" | "none";
-
-export interface MatchQuality {
-  strategy: MatchStrategy;
-  confidence: number; // 0.0 - 1.0
-}
-
 export interface CorrelationResult {
   branchWork: BranchWork[];
   unmatchedSessions: Session[];

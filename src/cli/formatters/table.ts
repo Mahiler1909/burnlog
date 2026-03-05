@@ -222,7 +222,7 @@ function cleanPromptForDisplay(raw: string): string {
     const t = line.trim();
     if (!t) return noiseBuffer.length > 0; // blank line is noise only if inside a noise block
     return (
-      /^[│├└┌┬┼─╰╭╮╯┐┤┴╰╮]+/.test(t) ||
+      /^[│├└┌┬┼─╰╭╮╯┐┤┴]+/.test(t) ||
       /^\/Users\//.test(t) ||
       /^-Users-/.test(t) ||
       /^\s*sessions:\s*\d+/.test(t) ||
@@ -307,12 +307,7 @@ export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal
     // Simplify MCP tool names and sort by count
     const simplified = Object.entries(session.toolCounts)
       .map(([k, v]) => {
-        const name = k
-          .replace(/^mcp__claude-in-chrome__/, "chrome:")
-          .replace(/^mcp__atlassian__/, "jira:")
-          .replace(/^mcp__figma__/, "figma:")
-          .replace(/^mcp__jetbrains__/, "jetbrains:")
-          .replace(/^mcp__/, "mcp:");
+        const name = k.replace(/^mcp__([^_]+)__(.+)$/, "$1:$2").replace(/^mcp__/, "mcp:");
         return [name, v] as [string, number];
       })
       .sort((a, b) => b[1] - a[1]);

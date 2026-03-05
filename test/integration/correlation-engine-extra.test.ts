@@ -1,3 +1,5 @@
+// noinspection DuplicatedCode
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CorrelationEngine } from "../../src/core/correlation-engine.js";
 import { GitAnalyzer } from "../../src/git/git-analyzer.js";

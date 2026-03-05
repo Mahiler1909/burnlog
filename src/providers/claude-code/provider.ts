@@ -24,6 +24,49 @@ const PROJECTS_DIR = join(CLAUDE_DIR, "projects");
 const FACETS_DIR = join(CLAUDE_DIR, "usage-data", "facets");
 const SESSION_META_DIR = join(CLAUDE_DIR, "usage-data", "session-meta");
 
+const EDIT_TOOLS = ["Edit", "Write", "NotebookEdit"];
+const READ_TOOLS = ["Read", "Glob", "Grep"];
+const META_TOOLS = [
+  "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput",
+  "AskUserQuestion", "ExitPlanMode", "EnterPlanMode", "EnterWorktree",
+];
+
+function isReadOnlyMCP(t: string): boolean {
+  if (!t.startsWith("mcp__")) return false;
+  const toolName = t.replace(/^mcp__[^_]+__/, "");
+  return /^(get|list|read|search|find|tabs|context)/.test(toolName);
+}
+
+export function classifyExchangeCategory(toolsUsed: string[]): ExchangeCategory {
+  if (toolsUsed.length === 0) return "planning";
+
+  const actionTools = toolsUsed.filter((t) => !META_TOOLS.includes(t));
+  if (actionTools.length === 0) return "planning";
+
+  const hasEdits = actionTools.some((t) => EDIT_TOOLS.includes(t));
+
+  const isExploration = actionTools.every((t) =>
+    READ_TOOLS.includes(t) ||
+    t === "Bash" ||
+    t === "Agent" ||
+    t === "WebSearch" ||
+    t === "WebFetch" ||
+    isReadOnlyMCP(t),
+  );
+
+  if (hasEdits) return "implementation";
+  if (isExploration) return "exploration";
+
+  const hasBrowserActions = actionTools.some((t) => {
+    if (!t.startsWith("mcp__")) return false;
+    const toolName = t.replace(/^mcp__[^_]+__/, "");
+    return /^(computer|navigate|form|click|type|input|submit)/.test(toolName);
+  });
+  if (hasBrowserActions) return "debugging";
+
+  return "implementation";
+}
+
 export class ClaudeCodeProvider implements AIToolProvider {
   readonly name = "claude-code";
 
@@ -117,8 +160,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
     // - Has messageCount but 0 cost and no exchanges = opened and closed without use
     return sessions.filter((s) => {
       if (s.exchanges.length > 0) return true;
-      if (s.messageCount > 0 && s.estimatedCostUSD > 0) return true;
-      return false;
+      return s.messageCount > 0 && s.estimatedCostUSD > 0;
     });
   }
 
@@ -443,57 +485,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
   }
 
   private classifyExchange(toolsUsed: string[], _prompt: string): ExchangeCategory {
-    if (toolsUsed.length === 0) return "planning";
-
-    const editTools = ["Edit", "Write", "NotebookEdit"];
-    const readTools = ["Read", "Glob", "Grep"];
-    const metaTools = [
-      "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput",
-      "AskUserQuestion", "ExitPlanMode", "EnterPlanMode", "EnterWorktree",
-    ];
-
-    // Filter out meta/orchestration tools for classification
-    const actionTools = toolsUsed.filter((t) => !metaTools.includes(t));
-    if (actionTools.length === 0) return "planning";
-
-    const hasEdits = actionTools.some((t) => editTools.includes(t));
-    // MCP tools that are read-only / exploratory
-    const isReadOnlyMCP = (t: string) => {
-      if (!t.startsWith("mcp__")) return false;
-      // Chrome read-only actions
-      if (t.startsWith("mcp__claude-in-chrome__read")) return true;
-      if (t.startsWith("mcp__claude-in-chrome__tabs")) return true;
-      if (t.startsWith("mcp__claude-in-chrome__find")) return true;
-      if (t.startsWith("mcp__claude-in-chrome__get")) return true;
-      // Known read-only MCP providers
-      if (t.startsWith("mcp__atlassian__")) return true;
-      if (t.startsWith("mcp__figma__")) return true;
-      // Generic MCP read patterns
-      if (t.includes("get_") || t.includes("list_") || t.includes("read_") || t.includes("search_") || t.includes("find_")) return true;
-      return false;
-    };
-
-    const isExploration = actionTools.every((t) =>
-      readTools.includes(t) ||
-      t === "Bash" ||
-      t === "Agent" ||
-      t === "WebSearch" ||
-      t === "WebFetch" ||
-      isReadOnlyMCP(t),
-    );
-
-    if (hasEdits) return "implementation";
-    if (isExploration) return "exploration";
-
-    // MCP browser actions (click, navigate, type) without edits = debugging/testing
-    const hasBrowserActions = actionTools.some((t) =>
-      t.startsWith("mcp__claude-in-chrome__computer") ||
-      t.startsWith("mcp__claude-in-chrome__navigate") ||
-      t.startsWith("mcp__claude-in-chrome__form"),
-    );
-    if (hasBrowserActions) return "debugging";
-
-    return "implementation";
+    return classifyExchangeCategory(toolsUsed);
   }
 
   private async ensureCaches(): Promise<void> {
@@ -695,10 +687,5 @@ export class ClaudeCodeProvider implements AIToolProvider {
     }
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     return sorted[0]?.[0] || "unknown";
-  }
-
-  private truncate(str: string, max: number): string {
-    if (str.length <= max) return str;
-    return str.slice(0, max - 1) + "…";
   }
 }

@@ -5,7 +5,6 @@ import type {
   GitCommit,
   ExchangeCategory,
   SessionOutcome,
-  Friction,
 } from "../../src/data/models.js";
 
 export function createTokenUsage(overrides?: Partial<TokenUsage>): TokenUsage {

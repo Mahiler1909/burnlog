@@ -1,4 +1,3 @@
-import { ClaudeCodeProvider } from "../../providers/claude-code/provider.js";
 import { buildCostBreakdown } from "../../core/token-ledger.js";
 import { CorrelationEngine } from "../../core/correlation-engine.js";
 import { GitAnalyzer } from "../../git/git-analyzer.js";
@@ -11,15 +10,11 @@ import {
 } from "../formatters/table.js";
 import { outputAs, type OutputFormat } from "../formatters/export.js";
 import { parsePeriodDays } from "../../utils/period.js";
-import { filterByProject, filterByPeriod } from "../../utils/filters.js";
+import { loadAndFilterSessions } from "../../utils/filters.js";
 
 export async function reportCommand(options: { period?: string; project?: string; format?: string }): Promise<void> {
-  const provider = new ClaudeCodeProvider();
-  let sessions = await provider.loadAllSessions();
-
   const days = parsePeriodDays(options.period || "30d");
-  sessions = filterByPeriod(sessions, options.period || "30d");
-  sessions = filterByProject(sessions, options.project);
+  const sessions = await loadAndFilterSessions(options);
 
   if (sessions.length === 0) {
     console.log("No sessions found for the given filters.");

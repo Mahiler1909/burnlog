@@ -4,7 +4,7 @@
   "description": "Correlate AI coding assistant token usage with real development work",
   "type": "module",
   "bin": {
-    "burnlog": "./dist/index.js"
+    "burnlog": "dist/index.js"
   },
   "files": [
     "dist",
@@ -15,7 +15,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",

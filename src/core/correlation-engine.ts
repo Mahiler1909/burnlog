@@ -282,13 +282,6 @@ export class CorrelationEngine {
     return matched;
   }
 
-  private isInTimeWindow(commit: GitCommit, sessions: Session[]): boolean {
-    const buffer = 2 * 60 * 60 * 1000;
-    const start = Math.min(...sessions.map((s) => s.startTime.getTime())) - buffer;
-    const end = Math.max(...sessions.map((s) => s.endTime.getTime())) + buffer;
-    return commit.timestamp.getTime() >= start && commit.timestamp.getTime() <= end;
-  }
-
   private buildBranchWork(
     branch: string,
     projectPath: string,

@@ -1,8 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { writeFile, mkdir, rm, readdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { describe, it, expect } from "vitest";
+import { classifyExchangeCategory } from "../../src/providers/claude-code/provider.js";
 
 // Test JSONL parsing by creating temp files and using the provider.
 // Since the provider reads from ~/.claude, we test the parsing logic indirectly
@@ -97,73 +94,35 @@ describe("JSONL format expectations", () => {
 });
 
 describe("Exchange classification from tools", () => {
-  // Test the classification logic more thoroughly with edge cases
-
-  function classify(toolsUsed: string[]): string {
-    if (toolsUsed.length === 0) return "planning";
-    const editTools = ["Edit", "Write", "NotebookEdit"];
-    const readTools = ["Read", "Glob", "Grep"];
-    const metaTools = [
-      "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput",
-      "AskUserQuestion", "ExitPlanMode", "EnterPlanMode", "EnterWorktree",
-    ];
-    const actionTools = toolsUsed.filter((t) => !metaTools.includes(t));
-    if (actionTools.length === 0) return "planning";
-    const hasEdits = actionTools.some((t) => editTools.includes(t));
-    const isReadOnlyMCP = (t: string) => {
-      if (!t.startsWith("mcp__")) return false;
-      if (t.startsWith("mcp__claude-in-chrome__read")) return true;
-      if (t.startsWith("mcp__claude-in-chrome__tabs")) return true;
-      if (t.startsWith("mcp__claude-in-chrome__find")) return true;
-      if (t.startsWith("mcp__claude-in-chrome__get")) return true;
-      if (t.startsWith("mcp__atlassian__")) return true;
-      if (t.startsWith("mcp__figma__")) return true;
-      if (t.includes("get_") || t.includes("list_") || t.includes("read_") || t.includes("search_") || t.includes("find_")) return true;
-      return false;
-    };
-    const isExploration = actionTools.every((t) =>
-      readTools.includes(t) || t === "Bash" || t === "Agent" || t === "WebSearch" || t === "WebFetch" || isReadOnlyMCP(t),
-    );
-    if (hasEdits) return "implementation";
-    if (isExploration) return "exploration";
-    const hasBrowserActions = actionTools.some((t) =>
-      t.startsWith("mcp__claude-in-chrome__computer") ||
-      t.startsWith("mcp__claude-in-chrome__navigate") ||
-      t.startsWith("mcp__claude-in-chrome__form"),
-    );
-    if (hasBrowserActions) return "debugging";
-    return "implementation";
-  }
-
   it("NotebookEdit is implementation", () => {
-    expect(classify(["NotebookEdit"])).toBe("implementation");
+    expect(classifyExchangeCategory(["NotebookEdit"])).toBe("implementation");
   });
 
   it("WebSearch + WebFetch is exploration", () => {
-    expect(classify(["WebSearch", "WebFetch"])).toBe("exploration");
+    expect(classifyExchangeCategory(["WebSearch", "WebFetch"])).toBe("exploration");
   });
 
   it("Agent-only is exploration", () => {
-    expect(classify(["Agent"])).toBe("exploration");
+    expect(classifyExchangeCategory(["Agent"])).toBe("exploration");
   });
 
   it("read-only MCP (atlassian) is exploration", () => {
-    expect(classify(["mcp__atlassian__getJiraIssue"])).toBe("exploration");
+    expect(classifyExchangeCategory(["mcp__atlassian__getJiraIssue"])).toBe("exploration");
   });
 
   it("read-only MCP (figma) is exploration", () => {
-    expect(classify(["mcp__figma__get_file"])).toBe("exploration");
+    expect(classifyExchangeCategory(["mcp__figma__get_file"])).toBe("exploration");
   });
 
   it("chrome read tabs is exploration", () => {
-    expect(classify(["mcp__claude-in-chrome__tabs_context_mcp"])).toBe("exploration");
+    expect(classifyExchangeCategory(["mcp__claude-in-chrome__tabs_context_mcp"])).toBe("exploration");
   });
 
   it("mixed meta + edit is implementation", () => {
-    expect(classify(["TaskCreate", "Edit"])).toBe("implementation");
+    expect(classifyExchangeCategory(["TaskCreate", "Edit"])).toBe("implementation");
   });
 
   it("unknown MCP tool defaults to implementation", () => {
-    expect(classify(["mcp__unknown__do_something"])).toBe("implementation");
+    expect(classifyExchangeCategory(["mcp__unknown__do_something"])).toBe("implementation");
   });
 });

@@ -1,33 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSession, createExchange } from "../fixtures/factory.js";
 import type { Session } from "../../src/data/models.js";
+import { setTestSessions, clearTestSessions, createMockProvider, createMockGitAnalyzer } from "../fixtures/mock-providers.js";
 
-let testSessions: Session[] = [];
-
-vi.mock("../../src/providers/claude-code/provider.js", () => {
-  return {
-    ClaudeCodeProvider: class {
-      name = "claude-code";
-      isAvailable() { return true; }
-      async listProjects() { return []; }
-      async loadSessionsForProject() { return []; }
-      async loadAllSessions() { return testSessions; }
-    },
-  };
-});
-
-vi.mock("../../src/git/git-analyzer.js", () => {
-  return {
-    GitAnalyzer: class {
-      async isGitRepo() { return false; }
-      async resolveGitRoot() { return null; }
-      async getCurrentBranch() { return "main"; }
-      async getCommits() { return []; }
-      async getCommitsForBranch() { return []; }
-      async getBranches() { return []; }
-    },
-  };
-});
+vi.mock("../../src/providers/claude-code/provider.js", () => createMockProvider());
+vi.mock("../../src/git/git-analyzer.js", () => createMockGitAnalyzer());
 
 function makeTestSessions(): Session[] {
   return [
@@ -58,7 +35,7 @@ describe("sessionsCommand", () => {
 
   beforeEach(() => {
     consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    testSessions = makeTestSessions();
+    setTestSessions(makeTestSessions());
   });
 
   afterEach(() => {
@@ -69,7 +46,7 @@ describe("sessionsCommand", () => {
     const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
     await sessionsCommand({ sort: "cost", format: "json" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed[0].cost).toBeGreaterThanOrEqual(parsed[1].cost);
   });
@@ -78,7 +55,7 @@ describe("sessionsCommand", () => {
     const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
     await sessionsCommand({ limit: 1, format: "json" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed).toHaveLength(1);
   });
@@ -87,7 +64,7 @@ describe("sessionsCommand", () => {
     const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
     await sessionsCommand({ sort: "tokens", format: "json" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed[0].tokens).toBeGreaterThanOrEqual(parsed[1].tokens);
   });
@@ -96,17 +73,17 @@ describe("sessionsCommand", () => {
     const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
     await sessionsCommand({ all: true, format: "json" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed).toHaveLength(2);
   });
 
   it("prints message when no sessions found", async () => {
-    testSessions = [];
+    clearTestSessions();
     const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
     await sessionsCommand({ format: "json" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     expect(output).toContain("No sessions found");
   });
 
@@ -114,7 +91,7 @@ describe("sessionsCommand", () => {
     const { sessionsCommand } = await import("../../src/cli/commands/sessions.js");
     await sessionsCommand({ format: "csv" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
     expect(output).toContain("id,date,project,branch,cost,tokens,outcome,summary");
   });
 });
@@ -131,16 +108,16 @@ describe("wasteCommand", () => {
   });
 
   it("prints message when no sessions found", async () => {
-    testSessions = [];
+    clearTestSessions();
     const { wasteCommand } = await import("../../src/cli/commands/waste.js");
     await wasteCommand({ format: "json" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     expect(output).toContain("No sessions found");
   });
 
   it("detects waste signals in sessions", async () => {
-    testSessions = [
+    setTestSessions([
       createSession({
         id: "waste-session",
         outcome: "not_achieved",
@@ -148,12 +125,12 @@ describe("wasteCommand", () => {
         estimatedCostUSD: 20,
         startTime: new Date(),
       }),
-    ];
+    ]);
 
     const { wasteCommand } = await import("../../src/cli/commands/waste.js");
     await wasteCommand({ format: "json" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed.length).toBeGreaterThan(0);
     expect(parsed.some((s: any) => s.type === "abandoned_session")).toBe(true);
@@ -172,21 +149,21 @@ describe("reportCommand", () => {
   });
 
   it("prints message when no sessions found", async () => {
-    testSessions = [];
+    clearTestSessions();
     const { reportCommand } = await import("../../src/cli/commands/report.js");
     await reportCommand({ format: "json" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     expect(output).toContain("No sessions found");
   });
 
   it("produces JSON output with summary and breakdowns", async () => {
-    testSessions = makeTestSessions();
+    setTestSessions(makeTestSessions());
 
     const { reportCommand } = await import("../../src/cli/commands/report.js");
     await reportCommand({ format: "json", period: "90d" });
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed.summary).toBeDefined();
     expect(parsed.summary.totalCost).toBeGreaterThan(0);
