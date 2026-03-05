@@ -1,5 +1,9 @@
 # burnlog
 
+[![npm version](https://img.shields.io/npm/v/burnlog)](https://www.npmjs.com/package/burnlog)
+[![license](https://img.shields.io/npm/l/burnlog)](./LICENSE)
+[![CI](https://github.com/Mahiler1909/burnlog/actions/workflows/ci.yml/badge.svg)](https://github.com/Mahiler1909/burnlog/actions/workflows/ci.yml)
+
 Correlate AI coding assistant token usage with real development work. Reads Claude Code's internal data files (`~/.claude/`) and git history to answer: **where did my tokens go and was it worth it?**
 
 ## Why
@@ -25,7 +29,7 @@ npx burnlog
 From source:
 
 ```bash
-git clone https://github.com/fernandochullo/burnlog.git
+git clone https://github.com/Mahiler1909/burnlog.git
 cd burnlog
 npm install
 npm run build
