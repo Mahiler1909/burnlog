@@ -27,6 +27,18 @@ export function totalTokens(usage: TokenUsage): number {
   return usage.inputTokens + usage.outputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
 }
 
+const CATEGORY_ALIASES: Record<string, string> = {
+  fix_bug: "bug_fix",
+  code_implementation: "implementation",
+  documentation_creation: "documentation",
+  documentation_cleanup: "documentation",
+  documentation_generation: "documentation",
+};
+
+function normalizeCategory(category: string): string {
+  return CATEGORY_ALIASES[category] ?? category;
+}
+
 export function buildCostBreakdown(sessions: Session[]): CostBreakdown {
   const byProject: Record<string, number> = {};
   const byBranch: Record<string, number> = {};
@@ -48,7 +60,7 @@ export function buildCostBreakdown(sessions: Session[]): CostBreakdown {
     const outcomeKey = s.outcome;
     byOutcome[outcomeKey] = (byOutcome[outcomeKey] ?? 0) + s.estimatedCostUSD;
 
-    const catKey = s.goalCategory || "unknown";
+    const catKey = normalizeCategory(s.goalCategory || "unknown");
     byCategory[catKey] = (byCategory[catKey] ?? 0) + s.estimatedCostUSD;
 
     for (const ex of s.exchanges) {

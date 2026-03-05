@@ -2,25 +2,21 @@ import { ClaudeCodeProvider } from "../../providers/claude-code/provider.js";
 import { renderSessionsList } from "../formatters/table.js";
 import { outputAs, type OutputFormat } from "../formatters/export.js";
 import { totalTokens } from "../../core/token-ledger.js";
+import { filterByProject, filterByPeriod } from "../../utils/filters.js";
 
 export async function sessionsCommand(options: {
   project?: string;
+  period?: string;
   sort?: string;
-  limit?: string;
+  limit?: number;
+  all?: boolean;
   format?: string;
 }): Promise<void> {
   const provider = new ClaudeCodeProvider();
   let sessions = await provider.loadAllSessions();
 
-  // Filter by project
-  if (options.project) {
-    const projectFilter = options.project.toLowerCase();
-    sessions = sessions.filter(
-      (s) =>
-        s.projectName.toLowerCase().includes(projectFilter) ||
-        s.projectPath.toLowerCase().includes(projectFilter),
-    );
-  }
+  sessions = filterByProject(sessions, options.project);
+  sessions = filterByPeriod(sessions, options.period);
 
   // Sort
   const sortBy = options.sort || "date";
@@ -32,13 +28,15 @@ export async function sessionsCommand(options: {
       sessions.sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
       break;
     case "tokens":
-      sessions.sort((a, b) => totalTokens(a.tokenUsage) - totalTokens(b.tokenUsage));
+      sessions.sort((a, b) => totalTokens(b.tokenUsage) - totalTokens(a.tokenUsage));
       break;
   }
 
   // Limit
-  const limit = options.limit ? parseInt(options.limit, 10) : 20;
-  sessions = sessions.slice(0, limit);
+  if (!options.all) {
+    const limit = options.limit ?? 20;
+    sessions = sessions.slice(0, limit);
+  }
 
   if (sessions.length === 0) {
     console.log("No sessions found.");

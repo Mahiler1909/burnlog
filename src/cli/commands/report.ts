@@ -10,34 +10,16 @@ import {
   renderByOutcome,
 } from "../formatters/table.js";
 import { outputAs, type OutputFormat } from "../formatters/export.js";
-
-function parsePeriodDays(period: string): number {
-  const match = period.match(/^(\d+)d$/);
-  if (match) return parseInt(match[1], 10);
-  if (period.endsWith("w")) return parseInt(period, 10) * 7;
-  if (period.endsWith("m")) return parseInt(period, 10) * 30;
-  return 30;
-}
+import { parsePeriodDays } from "../../utils/period.js";
+import { filterByProject, filterByPeriod } from "../../utils/filters.js";
 
 export async function reportCommand(options: { period?: string; project?: string; format?: string }): Promise<void> {
   const provider = new ClaudeCodeProvider();
   let sessions = await provider.loadAllSessions();
 
-  // Filter by period
   const days = parsePeriodDays(options.period || "30d");
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  sessions = sessions.filter((s) => s.startTime >= cutoff);
-
-  // Filter by project
-  if (options.project) {
-    const projectFilter = options.project.toLowerCase();
-    sessions = sessions.filter(
-      (s) =>
-        s.projectName.toLowerCase().includes(projectFilter) ||
-        s.projectPath.toLowerCase().includes(projectFilter),
-    );
-  }
+  sessions = filterByPeriod(sessions, options.period || "30d");
+  sessions = filterByProject(sessions, options.project);
 
   if (sessions.length === 0) {
     console.log("No sessions found for the given filters.");
@@ -67,7 +49,7 @@ export async function reportCommand(options: { period?: string; project?: string
     grouped.set(s.projectName, list);
   }
 
-  const data = [...grouped.entries()].map(([name, projectSessions]) => {
+  const byProject = [...grouped.entries()].map(([name, projectSessions]) => {
     const cost = projectSessions.reduce((s, x) => s + x.estimatedCostUSD, 0);
     const commits = commitsByProject.get(name) ?? 0;
     const linesAdded = projectSessions.reduce((s, x) => s + x.linesAdded, 0);
@@ -88,11 +70,31 @@ export async function reportCommand(options: { period?: string; project?: string
     };
   });
 
+  const breakdown = buildCostBreakdown(sessions);
+  const totalCost = sessions.reduce((s, x) => s + x.estimatedCostUSD, 0);
+  const totalCommits = [...commitsByProject.values()].reduce((s, c) => s + c, 0);
+
   const periodLabel = `Last ${days} days`;
+
+  const data = format === "csv"
+    ? byProject
+    : {
+        period: periodLabel,
+        summary: {
+          totalCost: Math.round(totalCost * 100) / 100,
+          sessions: sessions.length,
+          projects: new Set(sessions.map((s) => s.projectName)).size,
+          commits: totalCommits,
+        },
+        byProject,
+        byModel: breakdown.byModel,
+        byCategory: breakdown.byCategory,
+        byOutcome: breakdown.byOutcome,
+      };
+
   outputAs(format, data, () => {
     renderReportHeader(sessions, periodLabel, commitsByProject);
     renderByProject(sessions, commitsByProject);
-    const breakdown = buildCostBreakdown(sessions);
     renderByModel(breakdown);
     renderByCategory(breakdown);
     renderByOutcome(breakdown);

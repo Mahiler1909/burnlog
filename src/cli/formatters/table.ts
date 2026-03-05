@@ -189,11 +189,15 @@ export function renderSessionsList(sessions: Session[]): void {
       s.estimatedCostUSD > 0 ? formatCurrency(s.estimatedCostUSD) : chalk.dim("n/a"),
       totalTokens(s.tokenUsage) > 0 ? formatTokens(totalTokens(s.tokenUsage)) : chalk.dim("n/a"),
       outcomeIcon(s.outcome),
-      (s.summary || s.firstPrompt) || "—",
+      truncate((s.summary || s.firstPrompt) || "—", summaryW - 2),
     ]);
   }
 
   console.log(table.toString());
+}
+
+function humanizeWasteType(type: string): string {
+  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function truncate(text: string, max: number): string {
@@ -297,7 +301,7 @@ export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal
   console.log(`  Files:     ${session.filesModified} modified`);
   console.log(`  Commits:   ${commits?.length ?? session.gitCommits}`);
   console.log(`  Errors:    ${session.toolErrors}`);
-  console.log(`  Interrups: ${session.userInterruptions}`);
+  console.log(`  Interrupts: ${session.userInterruptions}`);
 
   if (Object.keys(session.toolCounts).length > 0) {
     // Simplify MCP tool names and sort by count
@@ -343,7 +347,7 @@ export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal
     console.log();
     console.log(chalk.bold.red(`Waste Signals (${wasteSignals.length})`));
     for (const sig of wasteSignals) {
-      console.log(`  ${chalk.red("$")} ${sig.type}: ${sig.description} (${formatCurrency(sig.estimatedWastedCostUSD)} wasted)`);
+      console.log(`  ${chalk.red("$")} ${humanizeWasteType(sig.type)}: ${sig.description} (${formatCurrency(sig.estimatedWastedCostUSD)} wasted)`);
       console.log(`    ${chalk.dim(sig.suggestion)}`);
     }
   }
@@ -493,7 +497,7 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
   console.log(`  Total Spend:      ${chalk.bold.green(formatCurrency(totalSpend))}`);
   console.log(`  Estimated Waste:  ${chalk.bold.red(formatCurrency(totalWaste))} (${wastePct}%)`);
   if (topType) {
-    console.log(`  Top Waste Type:   ${topType[0]} (${formatCurrency(topType[1].cost)})`);
+    console.log(`  Top Waste Type:   ${humanizeWasteType(topType[0])} (${formatCurrency(topType[1].cost)})`);
   }
   console.log();
 
@@ -510,7 +514,7 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
 
   for (const [type, data] of [...byType.entries()].sort((a, b) => b[1].cost - a[1].cost)) {
     const pct = totalWaste > 0 ? ((data.cost / totalWaste) * 100).toFixed(1) : "0.0";
-    typeTable.push([type, formatCurrency(data.cost), data.count.toString(), `${pct}%`]);
+    typeTable.push([humanizeWasteType(type), formatCurrency(data.cost), data.count.toString(), `${pct}%`]);
   }
 
   console.log(chalk.bold("By Waste Type"));
@@ -527,7 +531,7 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
   for (const sig of signals.slice(0, 5)) {
     sigTable.push([
       sig.sessionId.slice(0, 8),
-      sig.type,
+      humanizeWasteType(sig.type),
       formatCurrency(sig.estimatedWastedCostUSD),
       sig.description.slice(0, 38),
     ]);
@@ -542,7 +546,7 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
   for (const sig of signals) {
     if (seenTypes.has(sig.type)) continue;
     seenTypes.add(sig.type);
-    console.log(`  ${chalk.yellow("!")} ${chalk.bold(sig.type)}: ${sig.suggestion}`);
+    console.log(`  ${chalk.yellow("!")} ${chalk.bold(humanizeWasteType(sig.type))}: ${sig.suggestion}`);
   }
   console.log();
 }

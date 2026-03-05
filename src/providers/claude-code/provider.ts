@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
+import { execSync } from "node:child_process";
 import type { AIToolProvider } from "../provider.interface.js";
 import type {
   Project,
@@ -130,7 +131,36 @@ export class ClaudeCodeProvider implements AIToolProvider {
       allSessions.push(...sessions);
     }
 
+    // Resolve "HEAD" branch names to actual branch for display
+    this.resolveHeadBranches(allSessions);
+
     return allSessions;
+  }
+
+  private resolveHeadBranches(sessions: Session[]): void {
+    const headSessions = sessions.filter((s) => s.gitBranch === "HEAD");
+    if (headSessions.length === 0) return;
+
+    const branchByPath = new Map<string, string>();
+    for (const s of headSessions) {
+      if (branchByPath.has(s.projectPath)) {
+        s.gitBranch = branchByPath.get(s.projectPath)!;
+        continue;
+      }
+      try {
+        const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+          cwd: s.projectPath,
+          timeout: 5000,
+          encoding: "utf-8",
+        }).trim();
+        if (branch && branch !== "HEAD") {
+          branchByPath.set(s.projectPath, branch);
+          s.gitBranch = branch;
+        }
+      } catch {
+        // Not a git repo or path doesn't exist — leave as "HEAD"
+      }
+    }
   }
 
   private async buildSession(

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Command } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
 import { reportCommand } from "./cli/commands/report.js";
 import { sessionsCommand } from "./cli/commands/sessions.js";
 import { sessionCommand } from "./cli/commands/session.js";
@@ -15,51 +15,63 @@ program
   .description("Correlate AI token usage with real development work")
   .version("0.1.0");
 
-const formatOption = ["-f, --format <format>", "Output format: table, json, csv", "table"] as const;
+function addFormatOption(cmd: Command): Command {
+  return cmd.addOption(
+    new Option("-f, --format <format>", "Output format")
+      .choices(["table", "json", "csv"])
+      .default("table"),
+  );
+}
 
-program
-  .command("report")
-  .description("Token spend dashboard: where did my tokens go?")
-  .option("-p, --period <period>", "Time period (e.g., 7d, 30d, 90d)", "30d")
-  .option("--project <path>", "Filter by project name or path")
-  .option(formatOption[0], formatOption[1], formatOption[2])
-  .action(reportCommand);
+addFormatOption(
+  program
+    .command("report", { isDefault: true })
+    .description("Token spend dashboard: where did my tokens go?")
+    .option("-p, --period <period>", "Time period (e.g., 7d, 30d, 90d)", "30d")
+    .option("--project <path>", "Filter by project name or path"),
+).action(reportCommand);
 
-program
-  .command("sessions")
-  .description("List all sessions with cost and outcome")
-  .option("--project <path>", "Filter by project name or path")
-  .option("-s, --sort <field>", "Sort by: date, cost, tokens", "date")
-  .option("-l, --limit <n>", "Max sessions to show", "20")
-  .option(formatOption[0], formatOption[1], formatOption[2])
-  .action(sessionsCommand);
+addFormatOption(
+  program
+    .command("sessions")
+    .description("List all sessions with cost and outcome")
+    .option("--project <path>", "Filter by project name or path")
+    .option("-p, --period <period>", "Time period (e.g., 7d, 30d, 90d)")
+    .addOption(new Option("-s, --sort <field>", "Sort by").choices(["date", "cost", "tokens"]).default("date"))
+    .option("-l, --limit <n>", "Max sessions to show", (v: string) => {
+      const n = parseInt(v, 10);
+      if (isNaN(n) || n <= 0) throw new InvalidArgumentError("Must be a positive integer.");
+      return n;
+    }, 20)
+    .option("-a, --all", "Show all sessions (no limit)"),
+).action(sessionsCommand);
 
-program
-  .command("session <id>")
-  .description("Deep dive into a single session")
-  .option(formatOption[0], formatOption[1], formatOption[2])
-  .action(sessionCommand);
+addFormatOption(
+  program
+    .command("session <id>")
+    .description("Deep dive into a single session"),
+).action(sessionCommand);
 
-program
-  .command("branch <name>")
-  .description("Cost breakdown for a feature branch")
-  .option("--project <path>", "Filter by project name or path")
-  .option(formatOption[0], formatOption[1], formatOption[2])
-  .action(branchCommand);
+addFormatOption(
+  program
+    .command("branch <name>")
+    .description("Cost breakdown for a feature branch")
+    .option("--project <path>", "Filter by project name or path"),
+).action(branchCommand);
 
-program
-  .command("waste")
-  .description("Detect wasted token spend with actionable tips")
-  .option("-p, --period <period>", "Time period (e.g., 7d, 30d, 90d)", "30d")
-  .option("--project <path>", "Filter by project name or path")
-  .option(formatOption[0], formatOption[1], formatOption[2])
-  .action(wasteCommand);
+addFormatOption(
+  program
+    .command("waste")
+    .description("Detect wasted token spend with actionable tips")
+    .option("-p, --period <period>", "Time period (e.g., 7d, 30d, 90d)", "30d")
+    .option("--project <path>", "Filter by project name or path"),
+).action(wasteCommand);
 
-program
-  .command("compare <branchA> <branchB>")
-  .description("Compare efficiency between two branches")
-  .option("--project <path>", "Filter by project name or path")
-  .option(formatOption[0], formatOption[1], formatOption[2])
-  .action(compareCommand);
+addFormatOption(
+  program
+    .command("compare <branchA> <branchB>")
+    .description("Compare efficiency between two branches (use --project for multi-project)")
+    .option("--project <path>", "Filter by project name or path"),
+).action(compareCommand);
 
 program.parse();

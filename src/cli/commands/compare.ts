@@ -3,6 +3,7 @@ import { GitAnalyzer } from "../../git/git-analyzer.js";
 import { CorrelationEngine } from "../../core/correlation-engine.js";
 import { renderBranchComparison } from "../formatters/table.js";
 import { outputAs, type OutputFormat } from "../formatters/export.js";
+import { filterByProject } from "../../utils/filters.js";
 
 export async function compareCommand(
   branchA: string,
@@ -12,14 +13,7 @@ export async function compareCommand(
   const provider = new ClaudeCodeProvider();
   let sessions = await provider.loadAllSessions();
 
-  if (options.project) {
-    const filter = options.project.toLowerCase();
-    sessions = sessions.filter(
-      (s) =>
-        s.projectName.toLowerCase().includes(filter) ||
-        s.projectPath.toLowerCase().includes(filter),
-    );
-  }
+  sessions = filterByProject(sessions, options.project);
 
   if (sessions.length === 0) {
     console.log("No sessions found.");
