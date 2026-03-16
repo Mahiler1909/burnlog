@@ -47,7 +47,7 @@ describe("renderReportHeader", () => {
 
   it("uses commitsByProject when provided", () => {
     const commits = new Map([["app-a", 5], ["app-b", 2]]);
-    const output = captureConsole(() => renderReportHeader(sessions, "Last 7 days", commits));
+    const output = captureConsole(() => renderReportHeader(sessions, "Last 7 days", { commitsByProject: commits }));
     expect(output).toContain("7 commits");
   });
 });

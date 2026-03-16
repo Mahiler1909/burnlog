@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-16
+
+Visual overhaul and new high-value commands. Zero new runtime dependencies.
+
+### Added
+
+#### Visual Enhancements
+- Unicode bar charts (`▏▎▍▌▋▊▉█`) in all percentage tables (By Model, By Category, By Outcome, By Waste Type)
+- Daily cost sparkline (`▁▂▃▄▅▆▇█`) in report header with color gradient (green→yellow→red) and peak day indicator
+- Efficiency Score (0–100) — composite metric combining outcome ratio, waste ratio, cost/commit, and cache hit rate
+- Score gauge with red-to-green gradient via `chalk.rgb()` displayed in report header and branch detail
+- Colored outcome dot indicators: `●` (achieved), `◐` (partial), `○` (failed), `◌` (unknown)
+- Outcome distribution summary line above session lists: `●●●●●◐◐○ (5 OK / 2 partial / 1 fail)`
+- Waste ratio bar gauge in waste report header
+
+#### New Commands
+- `burnlog today` — Quick daily summary with efficiency score, session list, and "vs Yesterday" comparison
+- `burnlog budget set --daily/--weekly/--monthly` — Configure spending limits (stored in `~/.config/burnlog/config.json`)
+- `burnlog budget` — Track progress against budget with visual gauge bars and monthly projection
+- `burnlog trends` — Multi-week trend analysis with per-week sparklines, efficiency scores, and trend arrows (▲▼)
+
+#### Core
+- `efficiency-score.ts` — Composite scoring engine (outcome 35%, waste 25%, cost/commit 20%, cache 20%)
+- `budget.ts` — Budget config persistence, spend projection, and budget-hit-date calculation
+
+### Changed
+- `renderReportHeader` now accepts `opts` object for breakdown, efficiency, and commit data
+- `renderBranchDetail` accepts optional `efficiency` parameter for score display
+- `renderBranchComparison` accepts optional score parameters
+- Report command now computes waste signals and efficiency score
+- Version bumped to 0.2.0
+
 ## [0.1.0] - 2026-03-05
 
 First pre-release. Reads Claude Code session data from `~/.claude/` and

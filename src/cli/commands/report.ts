@@ -1,6 +1,8 @@
 import { buildCostBreakdown } from "../../core/token-ledger.js";
 import { CorrelationEngine } from "../../core/correlation-engine.js";
 import { GitAnalyzer } from "../../git/git-analyzer.js";
+import { InsightsEngine } from "../../core/insights-engine.js";
+import { computeEfficiency } from "../../core/efficiency-score.js";
 import {
   renderReportHeader,
   renderByProject,
@@ -33,6 +35,13 @@ export async function reportCommand(options: { period?: string; project?: string
     const current = commitsByProject.get(projectName) ?? 0;
     commitsByProject.set(projectName, current + bw.commits.length);
   }
+
+  const totalCommits = [...commitsByProject.values()].reduce((s, c) => s + c, 0);
+
+  // Waste + efficiency
+  const insights = new InsightsEngine();
+  const wasteSignals = insights.analyze(sessions);
+  const efficiency = computeEfficiency({ sessions, wasteSignals, totalCommits });
 
   const format = (options.format || "table") as OutputFormat;
 
@@ -67,7 +76,6 @@ export async function reportCommand(options: { period?: string; project?: string
 
   const breakdown = buildCostBreakdown(sessions);
   const totalCost = sessions.reduce((s, x) => s + x.estimatedCostUSD, 0);
-  const totalCommits = [...commitsByProject.values()].reduce((s, c) => s + c, 0);
 
   const periodLabel = `Last ${days} days`;
 
@@ -80,6 +88,7 @@ export async function reportCommand(options: { period?: string; project?: string
           sessions: sessions.length,
           projects: new Set(sessions.map((s) => s.projectName)).size,
           commits: totalCommits,
+          efficiencyScore: efficiency.score,
         },
         byProject,
         byModel: breakdown.byModel,
@@ -88,7 +97,7 @@ export async function reportCommand(options: { period?: string; project?: string
       };
 
   outputAs(format, data, () => {
-    renderReportHeader(sessions, periodLabel, commitsByProject);
+    renderReportHeader(sessions, periodLabel, { commitsByProject, breakdown, efficiency });
     renderByProject(sessions, commitsByProject);
     renderByModel(breakdown);
     renderByCategory(breakdown);

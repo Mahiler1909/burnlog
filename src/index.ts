@@ -7,13 +7,16 @@ import { sessionCommand } from "./cli/commands/session.js";
 import { branchCommand } from "./cli/commands/branch.js";
 import { wasteCommand } from "./cli/commands/waste.js";
 import { compareCommand } from "./cli/commands/compare.js";
+import { todayCommand } from "./cli/commands/today.js";
+import { budgetCommand, budgetSetCommand } from "./cli/commands/budget.js";
+import { trendsCommand } from "./cli/commands/trends.js";
 
 const program = new Command();
 
 program
   .name("burnlog")
   .description("Correlate AI token usage with real development work")
-  .version("0.1.0");
+  .version("0.2.0");
 
 function addFormatOption(cmd: Command): Command {
   return cmd.addOption(
@@ -73,5 +76,34 @@ addFormatOption(
     .description("Compare efficiency between two branches (use --project for multi-project)")
     .option("--project <path>", "Filter by project name or path"),
 ).action(compareCommand);
+
+// ── New v0.2.0 commands ──────────────────────────────────────────
+
+addFormatOption(
+  program
+    .command("today")
+    .description("Quick summary of today's token spend and efficiency"),
+).action(todayCommand);
+
+const budgetCmd = program
+  .command("budget")
+  .description("Track spending against daily/weekly/monthly budget limits");
+
+addFormatOption(budgetCmd).action(budgetCommand);
+
+budgetCmd
+  .command("set")
+  .description("Set budget limits")
+  .option("--daily <amount>", "Daily budget in USD")
+  .option("--weekly <amount>", "Weekly budget in USD")
+  .option("--monthly <amount>", "Monthly budget in USD")
+  .action(budgetSetCommand);
+
+addFormatOption(
+  program
+    .command("trends")
+    .description("Multi-week trend analysis of cost and efficiency")
+    .option("-w, --weeks <n>", "Number of weeks to analyze", "4"),
+).action(trendsCommand);
 
 program.parse();

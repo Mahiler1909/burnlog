@@ -3,6 +3,70 @@ import Table from "cli-table3";
 import type { Session, CostBreakdown, BranchWork, WasteSignal, GitCommit } from "../../data/models.js";
 import { totalTokens } from "../../core/token-ledger.js";
 import { getModelDisplayName } from "../../utils/pricing-tables.js";
+import type { EfficiencyResult } from "../../core/efficiency-score.js";
+
+// ── Visual Utilities ──────────────────────────────────────────────
+
+const BAR_BLOCKS = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
+const SPARK_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/**
+ * Render a horizontal bar chart from a 0–1 ratio.
+ * Uses 1/8-block Unicode characters for sub-character precision.
+ */
+export function renderBar(ratio: number, maxWidth = 20): string {
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const fullWidth = clamped * maxWidth;
+  const fullBlocks = Math.floor(fullWidth);
+  const remainder = fullWidth - fullBlocks;
+  const partialIndex = Math.round(remainder * 8);
+
+  let bar = BAR_BLOCKS[8].repeat(fullBlocks);
+  if (partialIndex > 0 && fullBlocks < maxWidth) {
+    bar += BAR_BLOCKS[partialIndex];
+  }
+  const empty = maxWidth - fullBlocks - (partialIndex > 0 ? 1 : 0);
+  bar += chalk.dim("░").repeat(Math.max(0, empty));
+  return bar;
+}
+
+/**
+ * Render a sparkline from an array of values.
+ * Maps each value to one of 8 vertical bar characters.
+ */
+export function renderSparkline(values: number[]): string {
+  if (values.length === 0) return "";
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min;
+
+  return values
+    .map((v) => {
+      if (range === 0) return SPARK_CHARS[3]; // mid-height if all equal
+      const normalized = (v - min) / range;
+      const idx = Math.min(7, Math.round(normalized * 7));
+      // Color gradient: green (low) → yellow (mid) → red (high)
+      const char = SPARK_CHARS[idx];
+      if (idx <= 2) return chalk.green(char);
+      if (idx <= 4) return chalk.yellow(char);
+      return chalk.red(char);
+    })
+    .join("");
+}
+
+/**
+ * Render the efficiency score with a colored bar gauge.
+ */
+export function renderScoreGauge(score: number, width = 20): string {
+  const ratio = score / 100;
+  const r = Math.round(255 * (1 - ratio));
+  const g = Math.round(255 * ratio);
+  const colored = chalk.rgb(r, g, 60)(renderBar(ratio, width).replace(/░/g, ""));
+  const empty = width - Math.ceil(ratio * width);
+  return `${score}/100 ${colored}${chalk.dim("░").repeat(Math.max(0, empty))}`;
+}
+
+// ── Formatting Helpers ────────────────────────────────────────────
 
 export function formatCurrency(amount: number): string {
   return `$${amount.toFixed(2)}`;
@@ -14,186 +78,51 @@ export function formatTokens(count: number): string {
   return count.toString();
 }
 
-function outcomeIcon(outcome: string): string {
+export function outcomeIcon(outcome: string): string {
   switch (outcome) {
     case "fully_achieved":
-      return chalk.green("OK");
+      return chalk.green("●");
     case "mostly_achieved":
-      return chalk.green("MOSTLY");
+      return chalk.green("◐");
     case "partially_achieved":
-      return chalk.yellow("PARTIAL");
+      return chalk.yellow("◐");
     case "not_achieved":
-      return chalk.red("FAIL");
+      return chalk.red("○");
     default:
-      return chalk.gray("—");
+      return chalk.gray("◌");
   }
 }
 
-export function renderReportHeader(sessions: Session[], periodLabel: string, commitsByProject?: Map<string, number>): void {
-  const totalCost = sessions.reduce((sum, s) => sum + s.estimatedCostUSD, 0);
-  const totalSessions = sessions.length;
-  const projects = new Set(sessions.map((s) => s.projectName)).size;
-  const totalCommits = commitsByProject
-    ? [...commitsByProject.values()].reduce((sum, c) => sum + c, 0)
-    : sessions.reduce((sum, s) => sum + s.gitCommits, 0);
-
-  console.log();
-  console.log(chalk.bold(`Burnlog Report (${periodLabel})`));
-  console.log(chalk.dim("═".repeat(60)));
-  console.log(
-    `Total: ${chalk.bold.green(formatCurrency(totalCost))}  |  ` +
-      `${totalSessions} sessions  |  ` +
-      `${projects} projects  |  ` +
-      `${totalCommits} commits`,
-  );
-  console.log();
-}
-
-export function renderByProject(sessions: Session[], commitsByProject?: Map<string, number>): void {
-  const grouped = new Map<string, Session[]>();
+/**
+ * Render an outcome distribution summary line.
+ */
+export function renderOutcomeDistribution(sessions: Session[]): string {
+  const counts = { ok: 0, mostly: 0, partial: 0, fail: 0, unknown: 0 };
   for (const s of sessions) {
-    const list = grouped.get(s.projectName) ?? [];
-    list.push(s);
-    grouped.set(s.projectName, list);
+    switch (s.outcome) {
+      case "fully_achieved": counts.ok++; break;
+      case "mostly_achieved": counts.mostly++; break;
+      case "partially_achieved": counts.partial++; break;
+      case "not_achieved": counts.fail++; break;
+      default: counts.unknown++; break;
+    }
   }
 
-  const table = new Table({
-    head: ["Project", "Cost", "Sessions", "Commits", "Lines +/-", "$/Commit", "$/Line", "Outcome"].map((h) =>
-      chalk.cyan(h),
-    ),
-    style: { head: [], border: [] },
-  });
+  const dots =
+    chalk.green("●").repeat(counts.ok) +
+    chalk.green("◐").repeat(counts.mostly) +
+    chalk.yellow("◐").repeat(counts.partial) +
+    chalk.red("○").repeat(counts.fail) +
+    chalk.gray("◌").repeat(counts.unknown);
 
-  const sorted = [...grouped.entries()].sort((a, b) => {
-    const costA = a[1].reduce((s, x) => s + x.estimatedCostUSD, 0);
-    const costB = b[1].reduce((s, x) => s + x.estimatedCostUSD, 0);
-    return costB - costA;
-  });
+  const parts: string[] = [];
+  if (counts.ok > 0) parts.push(`${counts.ok} OK`);
+  if (counts.mostly > 0) parts.push(`${counts.mostly} mostly`);
+  if (counts.partial > 0) parts.push(`${counts.partial} partial`);
+  if (counts.fail > 0) parts.push(`${counts.fail} fail`);
+  if (counts.unknown > 0) parts.push(`${counts.unknown} unknown`);
 
-  for (const [name, projectSessions] of sorted) {
-    const cost = projectSessions.reduce((s, x) => s + x.estimatedCostUSD, 0);
-    const commits = commitsByProject ? (commitsByProject.get(name) ?? 0) : projectSessions.reduce((s, x) => s + x.gitCommits, 0);
-    const linesAdded = projectSessions.reduce((s, x) => s + x.linesAdded, 0);
-    const linesRemoved = projectSessions.reduce((s, x) => s + x.linesRemoved, 0);
-    const totalLines = linesAdded + linesRemoved;
-    const achieved = projectSessions.filter((x) => x.outcome === "fully_achieved").length;
-
-    const costPerCommit = commits > 0 ? formatCurrency(cost / commits) : "—";
-    const costPerLine = totalLines > 0 ? "$" + (cost / totalLines).toFixed(3) : "—";
-
-    table.push([
-      name,
-      formatCurrency(cost),
-      projectSessions.length.toString(),
-      commits.toString(),
-      `+${linesAdded} / -${linesRemoved}`,
-      costPerCommit,
-      costPerLine,
-      `${achieved}/${projectSessions.length}`,
-    ]);
-  }
-
-  console.log(chalk.bold("By Project"));
-  console.log(table.toString());
-  console.log();
-}
-
-export function renderByModel(breakdown: CostBreakdown): void {
-  const table = new Table({
-    head: ["Model", "Cost", "% Total"].map((h) => chalk.cyan(h)),
-    style: { head: [], border: [] },
-  });
-
-  const total = Object.values(breakdown.byModel).reduce((a, b) => a + b, 0);
-  const sorted = Object.entries(breakdown.byModel)
-    .filter(([, cost]) => cost > 0.001)
-    .sort((a, b) => b[1] - a[1]);
-
-  for (const [model, cost] of sorted) {
-    const pct = total > 0 ? ((cost / total) * 100).toFixed(1) : "0.0";
-    table.push([getModelDisplayName(model), formatCurrency(cost), `${pct}%`]);
-  }
-
-  console.log(chalk.bold("By Model"));
-  console.log(table.toString());
-  console.log();
-}
-
-export function renderByCategory(breakdown: CostBreakdown): void {
-  const table = new Table({
-    head: ["Category", "Cost", "% Total"].map((h) => chalk.cyan(h)),
-    style: { head: [], border: [] },
-  });
-
-  const total = Object.values(breakdown.byCategory).reduce((a, b) => a + b, 0);
-  const sorted = Object.entries(breakdown.byCategory)
-    .filter(([, cost]) => cost > 0.001)
-    .sort((a, b) => b[1] - a[1]);
-
-  for (const [cat, cost] of sorted) {
-    const pct = total > 0 ? ((cost / total) * 100).toFixed(1) : "0.0";
-    table.push([cat, formatCurrency(cost), `${pct}%`]);
-  }
-
-  console.log(chalk.bold("By Goal Category"));
-  console.log(table.toString());
-  console.log();
-}
-
-export function renderByOutcome(breakdown: CostBreakdown): void {
-  const table = new Table({
-    head: ["Outcome", "Cost", "% Total"].map((h) => chalk.cyan(h)),
-    style: { head: [], border: [] },
-  });
-
-  const total = Object.values(breakdown.byOutcome).reduce((a, b) => a + b, 0);
-  const sorted = Object.entries(breakdown.byOutcome)
-    .filter(([, cost]) => cost > 0.001)
-    .sort((a, b) => b[1] - a[1]);
-
-  for (const [outcome, cost] of sorted) {
-    const pct = total > 0 ? ((cost / total) * 100).toFixed(1) : "0.0";
-    table.push([outcomeIcon(outcome) + " " + outcome, formatCurrency(cost), `${pct}%`]);
-  }
-
-  console.log(chalk.bold("By Outcome"));
-  console.log(table.toString());
-  console.log();
-}
-
-export function renderSessionsList(sessions: Session[]): void {
-  const termWidth = process.stdout.columns || 120;
-  // Fixed columns: ID(10) + Date(12) + Cost(10) + Tokens(10) + Outcome(9) + borders(~25) = ~76
-  const fixedWidth = 76;
-  const flexWidth = Math.max(termWidth - fixedWidth, 60);
-  // Distribute flex space: project 18%, branch 35%, summary 47%
-  const projectW = Math.max(Math.floor(flexWidth * 0.18), 14);
-  const branchW = Math.max(Math.floor(flexWidth * 0.35), 20);
-  const summaryW = Math.max(flexWidth - projectW - branchW, 20);
-
-  const table = new Table({
-    head: ["ID", "Date", "Project", "Branch", "Cost", "Tokens", "Outcome", "Summary"].map((h) =>
-      chalk.cyan(h),
-    ),
-    style: { head: [], border: [] },
-    colWidths: [10, 12, projectW, branchW, 10, 10, 9, summaryW],
-    wordWrap: true,
-  });
-
-  for (const s of sessions) {
-    table.push([
-      s.id.slice(0, 8),
-      s.startTime.toISOString().slice(0, 10),
-      truncate(s.projectName, projectW - 2),
-      truncate(s.gitBranch || "—", branchW - 2),
-      s.estimatedCostUSD > 0 ? formatCurrency(s.estimatedCostUSD) : chalk.dim("n/a"),
-      totalTokens(s.tokenUsage) > 0 ? formatTokens(totalTokens(s.tokenUsage)) : chalk.dim("n/a"),
-      outcomeIcon(s.outcome),
-      truncate((s.summary || s.firstPrompt) || "—", summaryW - 2),
-    ]);
-  }
-
-  console.log(table.toString());
+  return `${dots} (${parts.join(" / ")})`;
 }
 
 function humanizeWasteType(type: string): string {
@@ -208,19 +137,17 @@ function truncate(text: string, max: number): string {
 function cleanPromptForDisplay(raw: string): string {
   if (!raw || raw.length < 80) return raw;
 
-  // 1. Strip XML-like tags and their content
   let text = raw.replace(/<(bash-stdout|bash-stderr|task-notification|system-reminder|command-name|command-message|local-command-stdout)[^>]*>[\s\S]*?<\/\1>/gi, (_match, tag) => {
     return chalk.dim(`[${tag} collapsed]`);
   });
 
-  // 2. Collapse consecutive "noise" lines (paths, errors, indented output, table borders)
   const lines = text.split("\n");
   const result: string[] = [];
   let noiseBuffer: string[] = [];
 
   const isNoise = (line: string): boolean => {
     const t = line.trim();
-    if (!t) return noiseBuffer.length > 0; // blank line is noise only if inside a noise block
+    if (!t) return noiseBuffer.length > 0;
     return (
       /^[│├└┌┬┼─╰╭╮╯┐┤┴]+/.test(t) ||
       /^\/Users\//.test(t) ||
@@ -279,6 +206,215 @@ function wrapIndented(text: string, indent: number): string {
   return lines.join("\n" + pad);
 }
 
+// ── Report Renderers ──────────────────────────────────────────────
+
+export function renderReportHeader(
+  sessions: Session[],
+  periodLabel: string,
+  opts?: {
+    commitsByProject?: Map<string, number>;
+    breakdown?: CostBreakdown;
+    efficiency?: EfficiencyResult;
+  },
+): void {
+  const totalCost = sessions.reduce((sum, s) => sum + s.estimatedCostUSD, 0);
+  const totalSessions = sessions.length;
+  const projects = new Set(sessions.map((s) => s.projectName)).size;
+  const commitsByProject = opts?.commitsByProject;
+  const totalCommits = commitsByProject
+    ? [...commitsByProject.values()].reduce((sum, c) => sum + c, 0)
+    : sessions.reduce((sum, s) => sum + s.gitCommits, 0);
+
+  console.log();
+  console.log(chalk.bold(`Burnlog Report (${periodLabel})`));
+  console.log(chalk.dim("═".repeat(60)));
+  console.log(
+    `Total: ${chalk.bold.green(formatCurrency(totalCost))}  |  ` +
+      `${totalSessions} sessions  |  ` +
+      `${projects} projects  |  ` +
+      `${totalCommits} commits`,
+  );
+
+  // Efficiency score
+  if (opts?.efficiency) {
+    console.log(`Score: ${renderScoreGauge(opts.efficiency.score)}`);
+  }
+
+  // Daily sparkline
+  if (opts?.breakdown?.byDay) {
+    const dayEntries = Object.entries(opts.breakdown.byDay).sort(([a], [b]) => a.localeCompare(b));
+    if (dayEntries.length > 1) {
+      const values = dayEntries.map(([, v]) => v);
+      const peakIdx = values.indexOf(Math.max(...values));
+      const peakDate = dayEntries[peakIdx]?.[0] ?? "";
+      const peakCost = values[peakIdx] ?? 0;
+      console.log(
+        `Daily: ${renderSparkline(values)}  ` +
+          chalk.dim(`Peak: ${formatCurrency(peakCost)} on ${peakDate}`),
+      );
+    }
+  }
+
+  // Outcome distribution
+  console.log(`Outcomes: ${renderOutcomeDistribution(sessions)}`);
+  console.log();
+}
+
+export function renderByProject(sessions: Session[], commitsByProject?: Map<string, number>): void {
+  const grouped = new Map<string, Session[]>();
+  for (const s of sessions) {
+    const list = grouped.get(s.projectName) ?? [];
+    list.push(s);
+    grouped.set(s.projectName, list);
+  }
+
+  const table = new Table({
+    head: ["Project", "Cost", "Sessions", "Commits", "Lines +/-", "$/Commit", "$/Line", "Outcome"].map((h) =>
+      chalk.cyan(h),
+    ),
+    style: { head: [], border: [] },
+  });
+
+  const sorted = [...grouped.entries()].sort((a, b) => {
+    const costA = a[1].reduce((s, x) => s + x.estimatedCostUSD, 0);
+    const costB = b[1].reduce((s, x) => s + x.estimatedCostUSD, 0);
+    return costB - costA;
+  });
+
+  for (const [name, projectSessions] of sorted) {
+    const cost = projectSessions.reduce((s, x) => s + x.estimatedCostUSD, 0);
+    const commits = commitsByProject ? (commitsByProject.get(name) ?? 0) : projectSessions.reduce((s, x) => s + x.gitCommits, 0);
+    const linesAdded = projectSessions.reduce((s, x) => s + x.linesAdded, 0);
+    const linesRemoved = projectSessions.reduce((s, x) => s + x.linesRemoved, 0);
+    const totalLines = linesAdded + linesRemoved;
+    const achieved = projectSessions.filter((x) => x.outcome === "fully_achieved").length;
+
+    const costPerCommit = commits > 0 ? formatCurrency(cost / commits) : "—";
+    const costPerLine = totalLines > 0 ? "$" + (cost / totalLines).toFixed(3) : "—";
+
+    table.push([
+      name,
+      formatCurrency(cost),
+      projectSessions.length.toString(),
+      commits.toString(),
+      `+${linesAdded} / -${linesRemoved}`,
+      costPerCommit,
+      costPerLine,
+      `${achieved}/${projectSessions.length}`,
+    ]);
+  }
+
+  console.log(chalk.bold("By Project"));
+  console.log(table.toString());
+  console.log();
+}
+
+export function renderByModel(breakdown: CostBreakdown): void {
+  const table = new Table({
+    head: ["Model", "Cost", "% Total", ""].map((h) => chalk.cyan(h)),
+    style: { head: [], border: [] },
+  });
+
+  const total = Object.values(breakdown.byModel).reduce((a, b) => a + b, 0);
+  const sorted = Object.entries(breakdown.byModel)
+    .filter(([, cost]) => cost > 0.001)
+    .sort((a, b) => b[1] - a[1]);
+
+  for (const [model, cost] of sorted) {
+    const ratio = total > 0 ? cost / total : 0;
+    const pct = (ratio * 100).toFixed(1);
+    table.push([getModelDisplayName(model), formatCurrency(cost), `${pct}%`, chalk.cyan(renderBar(ratio, 15))]);
+  }
+
+  console.log(chalk.bold("By Model"));
+  console.log(table.toString());
+  console.log();
+}
+
+export function renderByCategory(breakdown: CostBreakdown): void {
+  const table = new Table({
+    head: ["Category", "Cost", "% Total", ""].map((h) => chalk.cyan(h)),
+    style: { head: [], border: [] },
+  });
+
+  const total = Object.values(breakdown.byCategory).reduce((a, b) => a + b, 0);
+  const sorted = Object.entries(breakdown.byCategory)
+    .filter(([, cost]) => cost > 0.001)
+    .sort((a, b) => b[1] - a[1]);
+
+  for (const [cat, cost] of sorted) {
+    const ratio = total > 0 ? cost / total : 0;
+    const pct = (ratio * 100).toFixed(1);
+    table.push([cat, formatCurrency(cost), `${pct}%`, chalk.cyan(renderBar(ratio, 15))]);
+  }
+
+  console.log(chalk.bold("By Goal Category"));
+  console.log(table.toString());
+  console.log();
+}
+
+export function renderByOutcome(breakdown: CostBreakdown): void {
+  const table = new Table({
+    head: ["Outcome", "Cost", "% Total", ""].map((h) => chalk.cyan(h)),
+    style: { head: [], border: [] },
+  });
+
+  const total = Object.values(breakdown.byOutcome).reduce((a, b) => a + b, 0);
+  const sorted = Object.entries(breakdown.byOutcome)
+    .filter(([, cost]) => cost > 0.001)
+    .sort((a, b) => b[1] - a[1]);
+
+  for (const [outcome, cost] of sorted) {
+    const ratio = total > 0 ? cost / total : 0;
+    const pct = (ratio * 100).toFixed(1);
+    const barColor = outcome === "fully_achieved" || outcome === "mostly_achieved"
+      ? chalk.green
+      : outcome === "not_achieved" ? chalk.red : chalk.yellow;
+    table.push([outcomeIcon(outcome) + " " + outcome, formatCurrency(cost), `${pct}%`, barColor(renderBar(ratio, 15))]);
+  }
+
+  console.log(chalk.bold("By Outcome"));
+  console.log(table.toString());
+  console.log();
+}
+
+export function renderSessionsList(sessions: Session[]): void {
+  // Outcome distribution above the table
+  console.log(`  ${renderOutcomeDistribution(sessions)}`);
+  console.log();
+
+  const termWidth = process.stdout.columns || 120;
+  const fixedWidth = 76;
+  const flexWidth = Math.max(termWidth - fixedWidth, 60);
+  const projectW = Math.max(Math.floor(flexWidth * 0.18), 14);
+  const branchW = Math.max(Math.floor(flexWidth * 0.35), 20);
+  const summaryW = Math.max(flexWidth - projectW - branchW, 20);
+
+  const table = new Table({
+    head: ["ID", "Date", "Project", "Branch", "Cost", "Tokens", "", "Summary"].map((h) =>
+      chalk.cyan(h),
+    ),
+    style: { head: [], border: [] },
+    colWidths: [10, 12, projectW, branchW, 10, 10, 3, summaryW],
+    wordWrap: true,
+  });
+
+  for (const s of sessions) {
+    table.push([
+      s.id.slice(0, 8),
+      s.startTime.toISOString().slice(0, 10),
+      truncate(s.projectName, projectW - 2),
+      truncate(s.gitBranch || "—", branchW - 2),
+      s.estimatedCostUSD > 0 ? formatCurrency(s.estimatedCostUSD) : chalk.dim("n/a"),
+      totalTokens(s.tokenUsage) > 0 ? formatTokens(totalTokens(s.tokenUsage)) : chalk.dim("n/a"),
+      outcomeIcon(s.outcome),
+      truncate((s.summary || s.firstPrompt) || "—", summaryW - 2),
+    ]);
+  }
+
+  console.log(table.toString());
+}
+
 export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal[], commits?: GitCommit[]): void {
   console.log();
   console.log(chalk.bold(`Session: ${session.id}`));
@@ -304,7 +440,6 @@ export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal
   console.log(`  Interrupts: ${session.userInterruptions}`);
 
   if (Object.keys(session.toolCounts).length > 0) {
-    // Simplify MCP tool names and sort by count
     const simplified = Object.entries(session.toolCounts)
       .map(([k, v]) => {
         const name = k.replace(/^mcp__([^_]+)__(.+)$/, "$1:$2").replace(/^mcp__/, "mcp:");
@@ -317,7 +452,6 @@ export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal
     console.log(`  Languages: ${Object.entries(session.languages).map(([k, v]) => `${k}:${v}`).join(", ")}`);
   }
 
-  // Files modified (derived from exchanges)
   const allModifiedFiles = new Set<string>();
   const allReadFiles = new Set<string>();
   for (const ex of session.exchanges) {
@@ -398,7 +532,7 @@ export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal
   console.log();
 }
 
-export function renderBranchDetail(bw: BranchWork, warnings?: string[]): void {
+export function renderBranchDetail(bw: BranchWork, warnings?: string[], efficiency?: EfficiencyResult): void {
   const linesAdded = bw.commits.reduce((s, c) => s + c.linesAdded, 0);
   const linesRemoved = bw.commits.reduce((s, c) => s + c.linesRemoved, 0);
   const totalLines = linesAdded + linesRemoved;
@@ -412,13 +546,16 @@ export function renderBranchDetail(bw: BranchWork, warnings?: string[]): void {
   console.log(`  Sessions:       ${bw.sessions.length}               Lines:       +${linesAdded} / -${linesRemoved}`);
   console.log(`  Duration:       ${days} days            Cost/Commit: ${bw.commits.length > 0 ? formatCurrency(bw.costPerCommit) : "—"}`);
   console.log(`  Waste Ratio:    ${Math.round(bw.wasteRatio * 100)}%              Cost/Line:   ${totalLines > 0 ? "$" + bw.costPerLineChanged.toFixed(3) : "—"}`);
+  if (efficiency) {
+    console.log(`  Score:          ${renderScoreGauge(efficiency.score)}`);
+  }
   console.log();
 
   // Sessions table
   const sessTable = new Table({
-    head: ["ID", "Date", "Cost", "Outcome", "Summary"].map((h) => chalk.cyan(h)),
+    head: ["ID", "Date", "Cost", "", "Summary"].map((h) => chalk.cyan(h)),
     style: { head: [], border: [] },
-    colWidths: [10, 12, 10, 10, 40],
+    colWidths: [10, 12, 10, 3, 40],
     wordWrap: true,
   });
 
@@ -490,7 +627,7 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
   console.log(chalk.bold(`Burnlog Waste Report (${periodLabel})`));
   console.log(chalk.dim("═".repeat(60)));
   console.log(`  Total Spend:      ${chalk.bold.green(formatCurrency(totalSpend))}`);
-  console.log(`  Estimated Waste:  ${chalk.bold.red(formatCurrency(totalWaste))} (${wastePct}%)`);
+  console.log(`  Estimated Waste:  ${chalk.bold.red(formatCurrency(totalWaste))} (${wastePct}%) ${chalk.red(renderBar(totalSpend > 0 ? totalWaste / totalSpend : 0, 15))}`);
   if (topType) {
     console.log(`  Top Waste Type:   ${humanizeWasteType(topType[0])} (${formatCurrency(topType[1].cost)})`);
   }
@@ -503,13 +640,14 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
   }
 
   const typeTable = new Table({
-    head: ["Type", "Wasted", "Count", "% of Waste"].map((h) => chalk.cyan(h)),
+    head: ["Type", "Wasted", "Count", "% of Waste", ""].map((h) => chalk.cyan(h)),
     style: { head: [], border: [] },
   });
 
   for (const [type, data] of [...byType.entries()].sort((a, b) => b[1].cost - a[1].cost)) {
-    const pct = totalWaste > 0 ? ((data.cost / totalWaste) * 100).toFixed(1) : "0.0";
-    typeTable.push([humanizeWasteType(type), formatCurrency(data.cost), data.count.toString(), `${pct}%`]);
+    const ratio = totalWaste > 0 ? data.cost / totalWaste : 0;
+    const pct = (ratio * 100).toFixed(1);
+    typeTable.push([humanizeWasteType(type), formatCurrency(data.cost), data.count.toString(), `${pct}%`, chalk.red(renderBar(ratio, 12))]);
   }
 
   console.log(chalk.bold("By Waste Type"));
@@ -546,7 +684,7 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
   console.log();
 }
 
-export function renderBranchComparison(a: BranchWork | null, b: BranchWork | null): void {
+export function renderBranchComparison(a: BranchWork | null, b: BranchWork | null, scoreA?: number, scoreB?: number): void {
   const nameA = a?.branchName || "(none)";
   const nameB = b?.branchName || "(none)";
 
@@ -573,7 +711,196 @@ export function renderBranchComparison(a: BranchWork | null, b: BranchWork | nul
   table.push(metric("Lines", lA + lrA > 0 ? `+${lA}/-${lrA}` : "—", lB + lrB > 0 ? `+${lB}/-${lrB}` : "—"));
   table.push(metric("Cost/Line", a && a.costPerLineChanged > 0 ? "$" + a.costPerLineChanged.toFixed(3) : "—", b && b.costPerLineChanged > 0 ? "$" + b.costPerLineChanged.toFixed(3) : "—"));
   table.push(metric("Waste", a ? `${Math.round(a.wasteRatio * 100)}%` : "—", b ? `${Math.round(b.wasteRatio * 100)}%` : "—"));
+  if (scoreA !== undefined || scoreB !== undefined) {
+    table.push(metric("Score", scoreA !== undefined ? `${scoreA}/100` : "—", scoreB !== undefined ? `${scoreB}/100` : "—"));
+  }
 
   console.log(table.toString());
+  console.log();
+}
+
+// ── Today Renderer ────────────────────────────────────────────────
+
+export function renderToday(
+  sessions: Session[],
+  dateLabel: string,
+  efficiency: EfficiencyResult,
+  wasteSignals: WasteSignal[],
+  totalCommits: number,
+  yesterday?: { cost: number; score: number; wastePct: number },
+): void {
+  const totalCost = sessions.reduce((sum, s) => sum + s.estimatedCostUSD, 0);
+  const linesAdded = sessions.reduce((sum, s) => sum + s.linesAdded, 0);
+  const linesRemoved = sessions.reduce((sum, s) => sum + s.linesRemoved, 0);
+  const totalWaste = wasteSignals.reduce((sum, w) => sum + w.estimatedWastedCostUSD, 0);
+  const wastePct = totalCost > 0 ? (totalWaste / totalCost) * 100 : 0;
+
+  console.log();
+  console.log(chalk.bold(`Burnlog Today (${dateLabel})`));
+  console.log(chalk.dim("═".repeat(60)));
+  console.log(
+    `  Spent: ${chalk.bold.green(formatCurrency(totalCost))} (${sessions.length} sessions)` +
+      `    Score: ${renderScoreGauge(efficiency.score, 15)}`,
+  );
+  console.log(
+    `  Lines: +${linesAdded} / -${linesRemoved} (${totalCommits} commits)` +
+      `  Waste: ${chalk.red(formatCurrency(totalWaste))} (${wastePct.toFixed(0)}%)`,
+  );
+
+  if (sessions.length > 0) {
+    console.log();
+    for (const s of sessions) {
+      const time = s.startTime.toTimeString().slice(0, 5);
+      const summary = truncate((s.summary || s.firstPrompt) || "—", 40);
+      console.log(
+        `  ${outcomeIcon(s.outcome)} ${chalk.dim(time)}  ${truncate(s.projectName, 12)}  ` +
+          `${chalk.dim(truncate(s.gitBranch || "—", 18))}  ${formatCurrency(s.estimatedCostUSD)}  ` +
+          `${chalk.dim(`"${summary}"`)}`,
+      );
+    }
+  }
+
+  if (yesterday) {
+    console.log();
+    const costDelta = yesterday.cost > 0 ? ((totalCost - yesterday.cost) / yesterday.cost) * 100 : 0;
+    const scoreDelta = efficiency.score - yesterday.score;
+    const wasteDelta = wastePct - yesterday.wastePct;
+
+    const arrow = (val: number, invert = false) => {
+      const isGood = invert ? val < 0 : val > 0;
+      if (Math.abs(val) < 0.5) return chalk.gray("→");
+      return isGood ? chalk.green("▼" + Math.abs(val).toFixed(0)) : chalk.red("▲" + Math.abs(val).toFixed(0));
+    };
+
+    console.log(
+      `  vs Yesterday: Cost ${arrow(-costDelta, true)}%  Score ${arrow(scoreDelta)}pts  Waste ${arrow(-wasteDelta, true)}%`,
+    );
+  }
+
+  console.log();
+}
+
+// ── Trends Renderer ───────────────────────────────────────────────
+
+export interface WeekBucket {
+  label: string;
+  cost: number;
+  sessions: number;
+  score: number;
+  wastePct: number;
+  dailyValues: number[];
+}
+
+export function renderTrends(weeks: WeekBucket[], totalLabel: string): void {
+  console.log();
+  console.log(chalk.bold(`Burnlog Trends (${totalLabel})`));
+  console.log(chalk.dim("═".repeat(60)));
+
+  const table = new Table({
+    head: ["Week", "Cost", "Sessions", "Score", "Waste", "Daily"].map((h) => chalk.cyan(h)),
+    style: { head: [], border: [] },
+    colWidths: [16, 10, 10, 8, 8, 16],
+  });
+
+  for (const w of weeks) {
+    table.push([
+      w.label,
+      formatCurrency(w.cost),
+      w.sessions.toString(),
+      `${w.score}`,
+      `${w.wastePct.toFixed(0)}%`,
+      renderSparkline(w.dailyValues),
+    ]);
+  }
+
+  console.log(table.toString());
+
+  // Trend arrows: compare first and last week
+  if (weeks.length >= 2) {
+    const current = weeks[weeks.length - 1];
+    const prev = weeks[weeks.length - 2];
+    const costDelta = prev.cost > 0 ? ((current.cost - prev.cost) / prev.cost) * 100 : 0;
+    const scoreDelta = current.score - prev.score;
+    const wasteDelta = current.wastePct - prev.wastePct;
+
+    const trendStr = (val: number, suffix: string, invert = false) => {
+      const isGood = invert ? val < 0 : val > 0;
+      if (Math.abs(val) < 0.5) return chalk.gray(`→0${suffix}`);
+      const arrow = val > 0 ? "▲" : "▼";
+      const color = isGood ? chalk.green : chalk.red;
+      return color(`${arrow}${Math.abs(val).toFixed(0)}${suffix}`);
+    };
+
+    console.log();
+    console.log(
+      `  Trends: Cost ${trendStr(costDelta, "%", true)}  |  ` +
+        `Score ${trendStr(scoreDelta, "pts")}  |  ` +
+        `Waste ${trendStr(wasteDelta, "%", true)}`,
+    );
+  }
+
+  // Most expensive day of week
+  const dayTotals: Record<string, { cost: number; count: number }> = {};
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  for (const w of weeks) {
+    // dailyValues has 7 entries (Mon-Sun) — approximate day mapping
+    for (let i = 0; i < w.dailyValues.length && i < 7; i++) {
+      const dayName = dayNames[(i + 1) % 7]; // offset: index 0 = Monday
+      const entry = dayTotals[dayName] ?? { cost: 0, count: 0 };
+      if (w.dailyValues[i] > 0) {
+        entry.cost += w.dailyValues[i];
+        entry.count++;
+      }
+      dayTotals[dayName] = entry;
+    }
+  }
+  const expensiveDay = Object.entries(dayTotals)
+    .filter(([, d]) => d.count > 0)
+    .map(([name, d]) => ({ name, avg: d.cost / d.count }))
+    .sort((a, b) => b.avg - a.avg)[0];
+
+  if (expensiveDay) {
+    console.log(`  Most expensive day: ${expensiveDay.name} (${formatCurrency(expensiveDay.avg)} avg)`);
+  }
+
+  console.log();
+}
+
+// ── Budget Renderer ───────────────────────────────────────────────
+
+export interface BudgetGauge {
+  label: string;
+  spent: number;
+  limit: number;
+}
+
+export function renderBudgetStatus(
+  gauges: BudgetGauge[],
+  projection?: { monthly: number; limit: number; hitDate?: string },
+): void {
+  console.log();
+  console.log(chalk.bold("Budget Status"));
+  console.log(chalk.dim("═".repeat(60)));
+
+  for (const g of gauges) {
+    const ratio = g.limit > 0 ? g.spent / g.limit : 0;
+    const pct = Math.round(ratio * 100);
+    const color = ratio > 0.9 ? chalk.red : ratio > 0.7 ? chalk.yellow : chalk.green;
+    console.log(
+      `  ${g.label.padEnd(10)} ${formatCurrency(g.spent).padStart(8)} / ${formatCurrency(g.limit)}  ` +
+        `${color(renderBar(ratio, 18))}  ${pct}%`,
+    );
+  }
+
+  if (projection) {
+    console.log();
+    const within = projection.monthly <= projection.limit;
+    const icon = within ? chalk.green("✓") : chalk.red("✗");
+    console.log(`  Projected monthly: ${formatCurrency(projection.monthly)} ${icon} ${within ? "within budget" : "over budget"}`);
+    if (!within && projection.hitDate) {
+      console.log(`  At current pace, you'll hit the monthly limit on ${chalk.red(projection.hitDate)}`);
+    }
+  }
+
   console.log();
 }
