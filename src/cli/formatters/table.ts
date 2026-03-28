@@ -13,6 +13,7 @@ const SPARK_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 /**
  * Render a horizontal bar chart from a 0–1 ratio.
  * Uses 1/8-block Unicode characters for sub-character precision.
+ * Empty space uses a subtle dot character for a cleaner look.
  */
 export function renderBar(ratio: number, maxWidth = 20): string {
   const clamped = Math.max(0, Math.min(1, ratio));
@@ -26,7 +27,7 @@ export function renderBar(ratio: number, maxWidth = 20): string {
     bar += BAR_BLOCKS[partialIndex];
   }
   const empty = maxWidth - fullBlocks - (partialIndex > 0 ? 1 : 0);
-  bar += chalk.dim("░").repeat(Math.max(0, empty));
+  bar += chalk.dim("─").repeat(Math.max(0, empty));
   return bar;
 }
 
@@ -61,9 +62,11 @@ export function renderScoreGauge(score: number, width = 20): string {
   const ratio = score / 100;
   const r = Math.round(255 * (1 - ratio));
   const g = Math.round(255 * ratio);
-  const colored = chalk.rgb(r, g, 60)(renderBar(ratio, width).replace(/░/g, ""));
-  const empty = width - Math.ceil(ratio * width);
-  return `${score}/100 ${colored}${chalk.dim("░").repeat(Math.max(0, empty))}`;
+  const filled = Math.ceil(ratio * width);
+  const empty = width - filled;
+  const filledBar = BAR_BLOCKS[8].repeat(filled);
+  const emptyBar = "─".repeat(Math.max(0, empty));
+  return `${score}/100 ${chalk.rgb(r, g, 60)(filledBar)}${chalk.dim(emptyBar)}`;
 }
 
 // ── Formatting Helpers ────────────────────────────────────────────
@@ -94,7 +97,8 @@ export function outcomeIcon(outcome: string): string {
 }
 
 /**
- * Render an outcome distribution summary line.
+ * Render an outcome distribution as a proportional bar + legend.
+ * Instead of N individual dots, shows a fixed-width stacked bar.
  */
 export function renderOutcomeDistribution(sessions: Session[]): string {
   const counts = { ok: 0, mostly: 0, partial: 0, fail: 0, unknown: 0 };
@@ -108,26 +112,49 @@ export function renderOutcomeDistribution(sessions: Session[]): string {
     }
   }
 
-  const dots =
-    chalk.green("●").repeat(counts.ok) +
-    chalk.green("◐").repeat(counts.mostly) +
-    chalk.yellow("◐").repeat(counts.partial) +
-    chalk.red("○").repeat(counts.fail) +
-    chalk.gray("◌").repeat(counts.unknown);
+  const total = sessions.length;
+  if (total === 0) return chalk.dim("no sessions");
+
+  // Build a fixed-width proportional bar (20 chars)
+  const barWidth = 20;
+  const segments: Array<{ count: number; color: (s: string) => string }> = [
+    { count: counts.ok, color: chalk.green },
+    { count: counts.mostly, color: chalk.greenBright },
+    { count: counts.partial, color: chalk.yellow },
+    { count: counts.fail, color: chalk.red },
+    { count: counts.unknown, color: chalk.gray },
+  ];
+
+  let bar = "";
+  let allocated = 0;
+  for (const seg of segments) {
+    if (seg.count === 0) continue;
+    const width = Math.max(1, Math.round((seg.count / total) * barWidth));
+    const clamped = Math.min(width, barWidth - allocated);
+    bar += seg.color("█".repeat(clamped));
+    allocated += clamped;
+  }
+  // Fill any remaining due to rounding
+  if (allocated < barWidth) {
+    bar += chalk.dim("─".repeat(barWidth - allocated));
+  }
 
   const parts: string[] = [];
-  if (counts.ok > 0) parts.push(`${counts.ok} OK`);
-  if (counts.mostly > 0) parts.push(`${counts.mostly} mostly`);
-  if (counts.partial > 0) parts.push(`${counts.partial} partial`);
-  if (counts.fail > 0) parts.push(`${counts.fail} fail`);
-  if (counts.unknown > 0) parts.push(`${counts.unknown} unknown`);
+  if (counts.ok > 0) parts.push(chalk.green(`${counts.ok} OK`));
+  if (counts.mostly > 0) parts.push(chalk.greenBright(`${counts.mostly} mostly`));
+  if (counts.partial > 0) parts.push(chalk.yellow(`${counts.partial} partial`));
+  if (counts.fail > 0) parts.push(chalk.red(`${counts.fail} fail`));
+  if (counts.unknown > 0) parts.push(chalk.gray(`${counts.unknown} unknown`));
 
-  return `${dots} (${parts.join(" / ")})`;
+  return `${bar} ${parts.join(chalk.dim(" · "))}`;
 }
 
-function humanizeWasteType(type: string): string {
+function humanizeType(type: string): string {
   return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+// Keep backward-compatible alias
+const humanizeWasteType = humanizeType;
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -342,10 +369,21 @@ export function renderByCategory(breakdown: CostBreakdown): void {
     .filter(([, cost]) => cost > 0.001)
     .sort((a, b) => b[1] - a[1]);
 
-  for (const [cat, cost] of sorted) {
+  const TOP_N = 5;
+  const top = sorted.slice(0, TOP_N);
+  const rest = sorted.slice(TOP_N);
+
+  for (const [cat, cost] of top) {
     const ratio = total > 0 ? cost / total : 0;
     const pct = (ratio * 100).toFixed(1);
-    table.push([cat, formatCurrency(cost), `${pct}%`, chalk.cyan(renderBar(ratio, 15))]);
+    table.push([humanizeType(cat), formatCurrency(cost), `${pct}%`, chalk.cyan(renderBar(ratio, 15))]);
+  }
+
+  if (rest.length > 0) {
+    const otherCost = rest.reduce((s, [, c]) => s + c, 0);
+    const ratio = total > 0 ? otherCost / total : 0;
+    const pct = (ratio * 100).toFixed(1);
+    table.push([chalk.dim(`Other (${rest.length} more)`), formatCurrency(otherCost), `${pct}%`, chalk.cyan(renderBar(ratio, 15))]);
   }
 
   console.log(chalk.bold("By Goal Category"));
@@ -354,15 +392,27 @@ export function renderByCategory(breakdown: CostBreakdown): void {
 }
 
 export function renderByOutcome(breakdown: CostBreakdown): void {
-  const table = new Table({
-    head: ["Outcome", "Cost", "% Total", ""].map((h) => chalk.cyan(h)),
-    style: { head: [], border: [] },
-  });
-
   const total = Object.values(breakdown.byOutcome).reduce((a, b) => a + b, 0);
   const sorted = Object.entries(breakdown.byOutcome)
     .filter(([, cost]) => cost > 0.001)
     .sort((a, b) => b[1] - a[1]);
+
+  // If one outcome dominates (>90%), show inline instead of a full table
+  if (sorted.length > 0 && total > 0) {
+    const topRatio = sorted[0][1] / total;
+    if (topRatio >= 0.9) {
+      const [topOutcome, topCost] = sorted[0];
+      const pct = (topRatio * 100).toFixed(0);
+      console.log(`${chalk.bold("Outcomes:")} ${outcomeIcon(topOutcome)} ${pct}% ${topOutcome.replace(/_/g, " ")} (${formatCurrency(topCost)})`);
+      console.log();
+      return;
+    }
+  }
+
+  const table = new Table({
+    head: ["Outcome", "Cost", "% Total", ""].map((h) => chalk.cyan(h)),
+    style: { head: [], border: [] },
+  });
 
   for (const [outcome, cost] of sorted) {
     const ratio = total > 0 ? cost / total : 0;
@@ -512,13 +562,21 @@ export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal
   console.log(`  Cache Read:   ${formatTokens(session.tokenUsage.cacheReadTokens)}`);
   console.log(`  Total:        ${formatTokens(totalTokens(session.tokenUsage))}`);
 
-  // Exchanges
+  // Exchanges — show top 15 by cost to keep output manageable
   if (session.exchanges.length > 0) {
+    const MAX_EXCHANGES = 15;
+    const sorted = [...session.exchanges].sort((a, b) => b.estimatedCostUSD - a.estimatedCostUSD);
+    const shown = sorted.slice(0, MAX_EXCHANGES);
+    const omitted = session.exchanges.length - shown.length;
+
     console.log();
-    console.log(chalk.bold(`Exchanges (${session.exchanges.length})`));
+    console.log(chalk.bold(`Exchanges (${session.exchanges.length} total, showing top ${shown.length} by cost)`));
     const indent = 14;
 
+    // Show in original sequence order for readability
+    const shownSet = new Set(shown.map((e) => e.sequenceNumber));
     for (const ex of session.exchanges) {
+      if (!shownSet.has(ex.sequenceNumber)) continue;
       console.log();
       console.log(chalk.dim(`  ─── #${ex.sequenceNumber} ───`));
       console.log(`  Cost:       ${formatCurrency(ex.estimatedCostUSD)}`);
@@ -526,6 +584,12 @@ export function renderSessionDetail(session: Session, wasteSignals?: WasteSignal
       console.log(`  Category:   ${ex.category}`);
       console.log(`  Tools:      ${ex.toolsUsed.join(", ") || "—"}`);
       console.log(`  Prompt:     ${wrapIndented(cleanPromptForDisplay(ex.userPrompt || "—"), indent)}`);
+    }
+
+    if (omitted > 0) {
+      const omittedCost = sorted.slice(MAX_EXCHANGES).reduce((s, e) => s + e.estimatedCostUSD, 0);
+      console.log();
+      console.log(chalk.dim(`  ... and ${omitted} more exchanges (${formatCurrency(omittedCost)} total)`));
     }
   }
 
@@ -565,7 +629,7 @@ export function renderBranchDetail(bw: BranchWork, warnings?: string[], efficien
       s.startTime.toISOString().slice(0, 10),
       formatCurrency(s.estimatedCostUSD),
       outcomeIcon(s.outcome),
-      (s.summary || s.firstPrompt).slice(0, 38),
+      truncate(s.summary || s.firstPrompt, 38),
     ]);
   }
 
@@ -657,7 +721,7 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
   const sigTable = new Table({
     head: ["Session", "Type", "Wasted", "Description"].map((h) => chalk.cyan(h)),
     style: { head: [], border: [] },
-    colWidths: [10, 24, 10, 40],
+    colWidths: [10, 24, 10, 62],
     wordWrap: true,
   });
 
@@ -666,7 +730,7 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
       sig.sessionId.slice(0, 8),
       humanizeWasteType(sig.type),
       formatCurrency(sig.estimatedWastedCostUSD),
-      sig.description.slice(0, 38),
+      truncate(sig.description, 60),
     ]);
   }
 

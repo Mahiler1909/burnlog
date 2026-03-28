@@ -6,7 +6,7 @@ import type { SessionOutcome } from "../../src/data/models.js";
 describe("renderBar", () => {
   it("returns empty bar for 0", () => {
     const bar = renderBar(0, 10);
-    // Should be 10 dim characters (░)
+    // Should be 10 dim characters (─)
     expect(bar.replace(/\x1b\[[^m]*m/g, "")).toHaveLength(10);
   });
 
@@ -14,7 +14,7 @@ describe("renderBar", () => {
     const bar = renderBar(1, 10);
     const stripped = bar.replace(/\x1b\[[^m]*m/g, "");
     expect(stripped).toContain("█");
-    expect(stripped.replace(/░/g, "")).toHaveLength(10);
+    expect(stripped.replace(/─/g, "")).toHaveLength(10);
   });
 
   it("returns partial bar for 0.5", () => {
@@ -27,7 +27,7 @@ describe("renderBar", () => {
   it("clamps values above 1", () => {
     const bar = renderBar(1.5, 10);
     const stripped = bar.replace(/\x1b\[[^m]*m/g, "");
-    expect(stripped.replace(/░/g, "")).toHaveLength(10);
+    expect(stripped.replace(/─/g, "")).toHaveLength(10);
   });
 
   it("clamps values below 0", () => {
@@ -130,6 +130,6 @@ describe("renderOutcomeDistribution", () => {
   it("handles empty sessions", () => {
     const result = renderOutcomeDistribution([]);
     const stripped = result.replace(/\x1b\[[^m]*m/g, "");
-    expect(stripped).toBe(" ()");
+    expect(stripped).toBe("no sessions");
   });
 });
