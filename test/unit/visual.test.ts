@@ -132,4 +132,31 @@ describe("renderOutcomeDistribution", () => {
     const stripped = result.replace(/\x1b\[[^m]*m/g, "");
     expect(stripped).toBe("no sessions");
   });
+
+  it("renders proportional bar with fixed width", () => {
+    const sessions = [
+      createSession({ outcome: "fully_achieved" as SessionOutcome }),
+      createSession({ outcome: "fully_achieved" as SessionOutcome }),
+      createSession({ outcome: "fully_achieved" as SessionOutcome }),
+      createSession({ outcome: "not_achieved" as SessionOutcome }),
+    ];
+    const result = renderOutcomeDistribution(sessions);
+    const stripped = result.replace(/\x1b\[[^m]*m/g, "");
+    // Bar should contain block chars and legend with separators
+    expect(stripped).toContain("█");
+    expect(stripped).toContain("3 OK");
+    expect(stripped).toContain("1 fail");
+    expect(stripped).toContain("·");
+  });
+
+  it("renders single-outcome sessions without empty segments", () => {
+    const sessions = [
+      createSession({ outcome: "fully_achieved" as SessionOutcome }),
+      createSession({ outcome: "fully_achieved" as SessionOutcome }),
+    ];
+    const result = renderOutcomeDistribution(sessions);
+    const stripped = result.replace(/\x1b\[[^m]*m/g, "");
+    expect(stripped).toContain("2 OK");
+    expect(stripped).not.toContain("fail");
+  });
 });
