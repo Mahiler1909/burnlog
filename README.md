@@ -1,5 +1,7 @@
 # burnlog
 
+**Know where your Claude Code tokens go. Stop the bleeding.**
+
 [![npm version](https://img.shields.io/npm/v/burnlog)](https://www.npmjs.com/package/burnlog)
 [![npm downloads](https://img.shields.io/npm/dm/burnlog)](https://www.npmjs.com/package/burnlog)
 [![license](https://img.shields.io/npm/l/burnlog)](./LICENSE)
@@ -7,270 +9,154 @@
 [![CI](https://github.com/Mahiler1909/burnlog/actions/workflows/ci.yml/badge.svg)](https://github.com/Mahiler1909/burnlog/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Mahiler1909/burnlog/graph/badge.svg)](https://codecov.io/gh/Mahiler1909/burnlog)
 
-Correlate AI coding assistant token usage with real development work. Reads Claude Code's internal data files (`~/.claude/`) and git history to answer: **where did my tokens go and was it worth it?**
+<!-- TODO: replace with asciinema/vhs recording -->
+```
+$ burnlog today
 
-## Why
+  Today's Burn                           vs Yesterday
+  ═══════════════════════════════════════════════════════
+  Spent:     $18.40  (4 sessions)        ▼ $6.20 less
+  Commits:   7                           ▲ 3 more
+  Efficiency: 74/100 ████████████░░░░░░  ▲ +12 points
+  Top Waste:  Retry loop on auth.ts      -$3.20
 
-Claude Code sessions can burn through tokens fast. Without visibility, you're flying blind:
+$ burnlog waste
+
+  Waste Report (Last 30 days)
+  ═══════════════════════════════════════════════════════
+  Total Spend:      $200.00
+  Estimated Waste:  $17.40 (8.7%)
+  Top Waste Type:   Debugging Loop ($16.11)
+
+  ┌──────────────────┬──────────┬────────────────────────────────┐
+  │ Pattern          │ Wasted   │ Suggestion                     │
+  ├──────────────────┼──────────┼────────────────────────────────┤
+  │ Debugging Loop   │ $16.11   │ Break the loop: write a test   │
+  │ Context Rebuild  │ $1.29    │ Keep sessions under 45 min     │
+  └──────────────────┴──────────┴────────────────────────────────┘
+```
+
+## The problem
+
+Claude Code sessions can cost $5-$200+. You have no idea where that goes. burnlog reads the data Claude Code already stores (`~/.claude/`) and cross-references it with `git log` to answer:
 
 - Which project eats the most budget?
 - Did that $50 session actually produce commits?
-- Am I wasting tokens on retry loops and abandoned sessions?
+- Am I stuck in retry loops burning tokens for nothing?
+- What's my efficiency trend this week vs last?
 
-burnlog reads the raw data Claude Code already stores and cross-references it with `git log` to give you hard numbers.
+## Try it now
+
+```bash
+npx burnlog
+```
+
+That's it. No config, no setup. If you've used Claude Code, you already have data.
 
 ## Install
 
 ```bash
-# From npm
 npm install -g burnlog
-
-# Or run without installing
-npx burnlog
-```
-
-From source:
-
-```bash
-git clone https://github.com/Mahiler1909/burnlog.git
-cd burnlog
-npm install
-npm run build
-npm link    # makes 'burnlog' available globally
-```
-
-## Quick start
-
-```bash
-burnlog                    # shows token spend dashboard (last 30 days)
-burnlog sessions -s cost   # list sessions sorted by cost
-burnlog waste              # detect wasted token spend
 ```
 
 ## Commands
 
-### `report` — Token spend dashboard (default)
+### Daily workflow
 
-```bash
-burnlog report                          # last 30 days, all projects
-burnlog report -p 7d                    # last 7 days
-burnlog report --project myapp          # filter by project
-burnlog report -f json                  # JSON output (includes all breakdowns)
-```
+| Command | What it does |
+|---------|-------------|
+| `burnlog today` | Quick daily summary with vs-yesterday comparison and efficiency score |
+| `burnlog budget` | Track spending against daily/weekly/monthly limits with projections |
+| `burnlog budget set --daily 25 --monthly 500` | Configure your budget limits |
+| `burnlog trends` | 4-week trend analysis with sparklines and efficiency scores |
 
-```
-Burnlog Report (Last 30 days)
-════════════════════════════════════════════════════════════
-Total: $199.81  |  12 sessions  |  3 projects  |  6 commits
+### Analysis
 
-By Project
-┌─────────┬─────────┬──────────┬─────────┬────────────┬──────────┬────────┬─────────┐
-│ Project │ Cost    │ Sessions │ Commits │ Lines +/-  │ $/Commit │ $/Line │ Outcome │
-└─────────┴─────────┴──────────┴─────────┴────────────┴──────────┴────────┴─────────┘
-```
+| Command | What it does |
+|---------|-------------|
+| `burnlog` | Token spend dashboard — last 30 days, broken down by project/model/outcome |
+| `burnlog sessions -s cost -l 10` | Top 10 most expensive sessions |
+| `burnlog session <id>` | Deep dive: exchange log, waste signals, correlated commits |
+| `burnlog waste` | Detect wasted spend with actionable suggestions |
+| `burnlog branch feat/US-402` | Cost breakdown for a feature branch ($/commit, $/line) |
+| `burnlog compare feat/US-402 fix/US-411` | Side-by-side efficiency comparison between branches |
 
-Includes breakdowns by model, goal category, and outcome.
+All commands support `--period` (7d, 30d, 90d), `--project`, and `-f json|csv|table`.
 
-### `sessions` — List all sessions
+## What it detects
 
-```bash
-burnlog sessions --project myapp
-burnlog sessions -s cost -l 10          # top 10 by cost
-burnlog sessions -p 7d                  # last 7 days only
-burnlog sessions --all                  # show all (no limit)
-burnlog sessions -f csv                 # CSV export
-```
+burnlog identifies 9 waste patterns and tells you how to fix them:
 
-Shows each session with ID, date, project, branch, cost, token count, outcome, and summary.
+| Pattern | What's happening | Suggestion |
+|---------|-----------------|------------|
+| **Retry Loop** | 3+ consecutive same-file edits with similar prompts | Break the loop — describe what's wrong differently |
+| **Debugging Loop** | 4+ consecutive fix attempts on the same files | Write a failing test first, then let Claude fix it |
+| **Abandoned Session** | High-cost session with no commits | Start smaller — break the task into pieces |
+| **Context Rebuild** | Expensive cache rebuilds mid-session | Keep sessions under 45 min to avoid context rot |
+| **Excessive Exploration** | 70%+ read-only exchanges, no edits | Be specific about what you want changed |
+| **Error Cascade** | Chain of consecutive tool failures | Check errors early — don't let Claude spiral |
+| **Stalled Exploration** | Repeated "continue" prompts with no progress | Redirect with a concrete next step |
+| **Wrong Approach** | Approach needed to be rethought mid-session | Spend 2 min planning before starting a session |
+| **High Cost/Line** | >$1/line on expensive sessions | Check if generated code was actually needed |
 
-### `session <id>` — Deep dive into a single session
+## Efficiency score
 
-```bash
-burnlog session 3dc22f18                # prefix match works
-burnlog session 3dc22f18 -f json
-```
+Each session and period gets a **0-100 efficiency score** combining:
 
-Shows full session detail including:
-- Token usage breakdown (input, output, cache)
-- Activity stats (lines, files, commits)
-- Exchange-level log (each prompt/response with cost, model, tools used)
-- Waste signals detected in the session
-- Correlated git commits
-
-### `branch <name>` — Cost breakdown for a feature branch
-
-```bash
-burnlog branch feat/US-402
-burnlog branch main --project myapp
-```
-
-Correlates sessions with git commits on the branch. Shows total cost, $/commit, $/line changed, and waste ratio.
-
-### `waste` — Detect wasted token spend
-
-```bash
-burnlog waste                           # last 30 days
-burnlog waste -p 7d --project myapp
-```
-
-```
-Burnlog Waste Report (Last 30 days)
-════════════════════════════════════════════════════════════
-  Total Spend:      $200.00
-  Estimated Waste:  $17.40 (8.7%)
-  Top Waste Type:   Debugging Loop ($16.11)
-```
-
-Detects patterns like:
-- **Retry Loop** — same tool called repeatedly with errors
-- **Debugging Loop** — consecutive fix attempts on the same file
-- **Abandoned Session** — high-cost session with no output
-- **Context Rebuild** — expensive cache rebuilds from long sessions
-- **Excessive Exploration** — too many reads with no edits
-- **Error Cascade** — chain of tool failures
-- **Stalled Exploration** — high read-to-write ratio
-- **Wrong Approach** — approach that needed to be rethought
-
-### `compare <branchA> <branchB>` — Compare branch efficiency
-
-```bash
-burnlog compare feat/US-402 fix/US-411 --project myapp
-```
-
-Side-by-side comparison of cost, commits, lines changed, $/commit, and waste ratio. Use `--project` when you have multiple projects with the same branch names.
-
-## Export formats
-
-All commands support `-f, --format`:
-
-| Format | Flag | Use case |
-|--------|------|----------|
-| Table | `-f table` (default) | Terminal viewing |
-| JSON | `-f json` | Piping to `jq`, dashboards, automation |
-| CSV | `-f csv` | Spreadsheets, data analysis |
-
-```bash
-burnlog report -f json | jq '.byProject[] | select(.cost > 10)'
-burnlog sessions --project myapp -f csv > sessions.csv
-```
+| Component | Weight | What it measures |
+|-----------|--------|-----------------|
+| Outcome | 35% | Did the session achieve its goal? |
+| Waste ratio | 25% | What % of spend was wasted? |
+| Cost efficiency | 20% | $/commit — lower is better |
+| Cache hit rate | 20% | How well prompts reused context? |
 
 ## Reading the numbers
 
 ### $/Commit
 
-How much each git commit cost in tokens. Lower is more efficient.
-
-| Range | Interpretation |
-|-------|---------------|
+| Range | Meaning |
+|-------|---------|
 | < $5 | Very efficient — quick, focused changes |
-| $5–$15 | Normal — typical feature work |
-| $15–$30 | Expensive — complex tasks or some back-and-forth |
-| > $30 | Investigate — possible retry loops or overexploration |
-
-### $/Line
-
-Cost per line of code changed (added + removed). Context-dependent — a 1-line bug fix may cost more per line than scaffolding 500 lines.
+| $5-$15 | Normal — typical feature work |
+| $15-$30 | Expensive — complex tasks or back-and-forth |
+| > $30 | Investigate — possible retry loops |
 
 ### Waste ratio
 
-Percentage of session cost attributed to detected waste patterns.
-
-| Range | Interpretation |
-|-------|---------------|
-| < 10% | Good — minimal waste |
-| 10–25% | Normal — some inefficiency is expected |
-| > 25% | High — review waste signals for actionable tips |
-
-### Outcome
-
-How well the session achieved its goal:
-
-| Value | Meaning |
+| Range | Meaning |
 |-------|---------|
-| `fully_achieved` | Task completed successfully |
-| `mostly_achieved` | Task completed with minor gaps |
-| `partially_achieved` | Some progress but incomplete |
-| `not_achieved` | Task not completed |
-| `unknown` | Short or planning-only sessions |
+| < 10% | Good — minimal waste |
+| 10-25% | Normal — some inefficiency is expected |
+| > 25% | High — check `burnlog waste` for tips |
+
+## Export & automation
+
+```bash
+# Pipe to jq for custom queries
+burnlog report -f json | jq '.byProject[] | select(.cost > 10)'
+
+# Export to CSV for spreadsheets
+burnlog sessions -f csv > sessions.csv
+
+# Daily spend check in your shell profile
+alias burn="npx burnlog today"
+```
 
 ## How it works
 
-### Data sources
+burnlog reads from `~/.claude/projects/` (session indexes, JSONL conversation logs, facets, and session metadata). It correlates sessions to git commits using a 3-tier strategy:
 
-burnlog reads from `~/.claude/projects/`:
+1. **Branch match** — session branch = commit branch (highest confidence)
+2. **Temporal match** — commit within session time window (±2 hours)
+3. **File overlap** — modified files in session overlap with commit diffs
 
-| Source | What it provides |
-|--------|-----------------|
-| `sessions-index.json` | Session list with IDs, paths, branches |
-| JSONL conversations | Token usage per exchange, tools used, files modified |
-| `usage-data/facets/*.json` | Goals, outcomes, satisfaction (when available) |
-| `usage-data/session-meta/*.json` | Aggregated stats per session |
-
-### Git correlation
-
-Sessions are matched to git commits using a 3-tier strategy:
-
-1. **Branch name match** — session's branch matches commit's branch (highest confidence)
-2. **Temporal match** — commit timestamp falls within session start/end +2 hours
-3. **File overlap** — basename overlap between session's modified files and commit's changed files
-
-### Outcome inference
-
-When Claude Code's facets data isn't available, burnlog infers outcomes from exchange patterns:
-
-- **fully_achieved** — has implementation exchanges, produced changes, no errors
-- **partially_achieved** — produced changes but had errors or interruptions
-- **not_achieved** — many exchanges but no implementation, or errors with no output
-- **unknown** — short or planning-only sessions
-
-## Troubleshooting
-
-### "No sessions found"
-
-- burnlog reads data from `~/.claude/`. Make sure you've used Claude Code at least once.
-- Check your `--period` filter — the default is 30 days. Use `-p 90d` for a wider window.
-- Check your `--project` filter — it matches project names and paths (case-insensitive, partial match).
-
-### Git repo not found
-
-- burnlog resolves git repos from the project paths stored in `~/.claude/`. If a project directory was moved or deleted, git correlation won't work for that project.
-- Git correlation is optional — token and cost data still shows without git.
-
-### Empty token counts
-
-- Older Claude Code versions may not log detailed usage data. burnlog falls back to session-meta when JSONL data is incomplete.
-
-## Architecture
-
-```
-src/
-├── index.ts                          # CLI entry (commander.js)
-├── data/models.ts                    # TypeScript interfaces
-├── providers/
-│   ├── provider.interface.ts         # Provider contract
-│   └── claude-code/provider.ts       # Reads ~/.claude/ data files
-├── core/
-│   ├── token-ledger.ts               # Token counting and cost calculation
-│   ├── correlation-engine.ts         # Git ↔ session matching
-│   └── insights-engine.ts            # Waste pattern detection
-├── git/
-│   └── git-analyzer.ts               # Git log, branch, diff operations
-├── cli/
-│   ├── commands/                     # One file per command
-│   └── formatters/
-│       ├── table.ts                  # Terminal table rendering
-│       └── export.ts                 # JSON/CSV output
-└── utils/
-    ├── pricing-tables.ts             # Model pricing data
-    ├── period.ts                     # Time period parsing
-    └── filters.ts                    # Shared session filters
-```
+No data leaves your machine. Everything is local, read-only.
 
 ## Requirements
 
 - Node.js >= 18
-- Claude Code installed (data lives in `~/.claude/`)
-- Git (for commit correlation)
+- Claude Code installed (data in `~/.claude/`)
+- Git (for commit correlation — optional)
 
 ## License
 

@@ -96,7 +96,7 @@ describe("todayCommand", () => {
     await todayCommand({ format: "json" });
 
     const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
-    expect(output).toContain("No sessions found for today");
+    expect(output).toContain("No sessions found in the last 7 days");
   });
 
   it("renders table format", async () => {
@@ -163,7 +163,10 @@ describe("budgetCommand", () => {
   });
 
   it("shows message when no budget configured", async () => {
-    // Budget file won't exist in test env
+    // Mock loadBudgetConfig to return empty config regardless of local machine state
+    const budgetModule = await import("../../src/core/budget.js");
+    vi.spyOn(budgetModule, "loadBudgetConfig").mockResolvedValue({});
+
     const { budgetCommand } = await import("../../src/cli/commands/budget.js");
     await budgetCommand({ format: "table" });
 

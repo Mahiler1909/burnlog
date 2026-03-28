@@ -78,8 +78,8 @@ describe("renderByModel", () => {
 describe("renderByCategory", () => {
   it("renders category table", () => {
     const output = captureConsole(() => renderByCategory(breakdown));
-    expect(output).toContain("bug_fix");
-    expect(output).toContain("implementation");
+    expect(output).toContain("Bug Fix");
+    expect(output).toContain("Implementation");
   });
 });
 
@@ -111,7 +111,7 @@ describe("renderSessionDetail", () => {
     const output = captureConsole(() => renderSessionDetail(session));
     expect(output).toContain("Session:");
     expect(output).toContain("Token Usage");
-    expect(output).toContain("Exchanges (2)");
+    expect(output).toContain("Exchanges (2 total");
     expect(output).toContain("Frictions");
   });
 
