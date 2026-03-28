@@ -90,13 +90,38 @@ describe("todayCommand", () => {
     expect(parsed.efficiencyScore).toBeDefined();
   });
 
-  it("prints message when no sessions today", async () => {
+  it("prints message when no sessions in last 7 days", async () => {
     clearTestSessions();
     const { todayCommand } = await import("../../src/cli/commands/today.js");
     await todayCommand({ format: "json" });
 
     const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     expect(output).toContain("No sessions found in the last 7 days");
+  });
+
+  it("shows last activity when no sessions today but recent sessions exist", async () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+    // Only yesterday sessions, none today
+    setTestSessions([
+      createSession({
+        id: "yesterday-only",
+        projectName: "my-app",
+        estimatedCostUSD: 12,
+        startTime: new Date(`${yesterdayStr}T09:00:00Z`),
+        endTime: new Date(`${yesterdayStr}T10:00:00Z`),
+        outcome: "fully_achieved" as SessionOutcome,
+        exchanges: [createExchange({ estimatedCostUSD: 12 })],
+      }),
+    ]);
+    const { todayCommand } = await import("../../src/cli/commands/today.js");
+    await todayCommand({ format: "table" });
+
+    const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+    expect(output).toContain("No sessions today");
+    expect(output).toContain("Last activity:");
+    expect(output).toContain("my-app");
   });
 
   it("renders table format", async () => {

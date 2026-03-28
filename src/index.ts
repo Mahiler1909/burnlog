@@ -16,7 +16,7 @@ const program = new Command();
 program
   .name("burnlog")
   .description("Correlate AI token usage with real development work")
-  .version("0.2.0");
+  .version("0.2.1");
 
 function addFormatOption(cmd: Command): Command {
   return cmd.addOption(

@@ -76,18 +76,48 @@ describe("renderByModel", () => {
 });
 
 describe("renderByCategory", () => {
-  it("renders category table", () => {
+  it("renders category table with humanized names", () => {
     const output = captureConsole(() => renderByCategory(breakdown));
     expect(output).toContain("Bug Fix");
     expect(output).toContain("Implementation");
   });
+
+  it("limits to top 5 categories and groups the rest as Other", () => {
+    const manyCategories: CostBreakdown = {
+      ...breakdown,
+      byCategory: {
+        implementation: 50, bug_fix: 30, documentation: 20,
+        feature_request: 15, devops_workflow: 10, code_review: 5,
+        exploration: 3, planning: 1,
+      },
+    };
+    const output = captureConsole(() => renderByCategory(manyCategories));
+    expect(output).toContain("Implementation");
+    expect(output).toContain("Bug Fix");
+    expect(output).toContain("Other (3 more)");
+    // The 6th+ categories should NOT appear as individual rows
+    expect(output).not.toContain("Code Review");
+    expect(output).not.toContain("Exploration");
+  });
 });
 
 describe("renderByOutcome", () => {
-  it("renders outcome table", () => {
+  it("renders outcome table when mixed outcomes", () => {
     const output = captureConsole(() => renderByOutcome(breakdown));
     expect(output).toContain("fully_achieved");
     expect(output).toContain("not_achieved");
+    expect(output).toContain("By Outcome");
+  });
+
+  it("renders inline when one outcome dominates (>90%)", () => {
+    const dominant: CostBreakdown = {
+      ...breakdown,
+      byOutcome: { fully_achieved: 95, not_achieved: 3, unknown: 2 },
+    };
+    const output = captureConsole(() => renderByOutcome(dominant));
+    expect(output).toContain("Outcomes:");
+    expect(output).toContain("95%");
+    expect(output).not.toContain("By Outcome");
   });
 });
 
@@ -113,6 +143,16 @@ describe("renderSessionDetail", () => {
     expect(output).toContain("Token Usage");
     expect(output).toContain("Exchanges (2 total");
     expect(output).toContain("Frictions");
+  });
+
+  it("limits exchanges to top 15 by cost and shows omitted count", () => {
+    const exchanges = Array.from({ length: 20 }, (_, i) =>
+      createExchange({ sequenceNumber: i, estimatedCostUSD: (20 - i) * 0.1 }),
+    );
+    const session = createSession({ exchanges });
+    const output = captureConsole(() => renderSessionDetail(session));
+    expect(output).toContain("20 total, showing top 15 by cost");
+    expect(output).toContain("... and 5 more exchanges");
   });
 
   it("renders waste signals and commits when provided", () => {
