@@ -24,6 +24,7 @@ export async function wasteCommand(options: {
   const data = signals.map((s) => ({
     sessionId: s.sessionId.slice(0, 8),
     type: s.type,
+    category: s.category,
     wastedCost: Math.round(s.estimatedWastedCostUSD * 100) / 100,
     description: s.description,
     suggestion: s.suggestion,

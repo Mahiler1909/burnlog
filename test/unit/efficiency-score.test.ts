@@ -6,6 +6,7 @@ import type { SessionOutcome, WasteSignal, WasteType } from "../../src/data/mode
 function createWasteSignal(overrides?: Partial<WasteSignal>): WasteSignal {
   return {
     type: "retry_loop" as WasteType,
+    category: "avoidable",
     sessionId: "test",
     estimatedWastedCostUSD: 1,
     description: "test waste",

@@ -397,15 +397,16 @@ export class ClaudeCodeProvider implements AIToolProvider {
 
           const filePath = input.file_path || input.path || "";
           if (!filePath) continue;
-          const fileName = typeof filePath === "string" ? filePath.split("/").pop() || filePath : "";
+          const filePathStr = typeof filePath === "string" ? filePath : "";
+          const fileName = filePathStr ? filePathStr.split("/").pop() || filePathStr : "";
 
           switch (block.name) {
             case "Read":
-              activity.filesRead.add(fileName);
+              activity.filesRead.add(filePathStr);
               filesRead.push(fileName);
               break;
             case "Edit": {
-              activity.filesModified.add(fileName);
+              activity.filesModified.add(filePathStr);
               activity.editCount++;
               filesModified.push(fileName);
               // Calculate lines from old_string/new_string
@@ -418,7 +419,7 @@ export class ClaudeCodeProvider implements AIToolProvider {
               break;
             }
             case "Write": {
-              activity.filesModified.add(fileName);
+              activity.filesModified.add(filePathStr);
               activity.writeCount++;
               filesModified.push(fileName);
               const writeContent = typeof input.content === "string" ? input.content : "";
@@ -619,17 +620,17 @@ export class ClaudeCodeProvider implements AIToolProvider {
 
     const hasImpl = exchanges.some((e) => e.category === "implementation");
     const producedChanges = activity.linesAdded > 0 || activity.filesModified.size > 0;
+    const hasMeta = !!meta;
     const errors = meta?.tool_errors ?? 0;
     const interruptions = meta?.user_interruptions ?? 0;
 
-    if (hasImpl && producedChanges && errors === 0 && interruptions === 0) {
-      return "fully_achieved";
-    }
-    if (hasImpl && producedChanges && errors === 0) {
-      return "mostly_achieved";
-    }
     if (hasImpl && producedChanges) {
-      return "partially_achieved";
+      // With meta: use error/interruption data for fine-grained inference
+      if (hasMeta && errors === 0 && interruptions === 0) return "fully_achieved";
+      if (hasMeta && errors === 0) return "mostly_achieved";
+      if (hasMeta) return "partially_achieved";
+      // Without meta: can't distinguish — assume mostly (conservative)
+      return "mostly_achieved";
     }
     const totalCost = exchanges.reduce((s, e) => s + e.estimatedCostUSD, 0);
     if (exchanges.length > 3 && !hasImpl && totalCost > 0.5) {
