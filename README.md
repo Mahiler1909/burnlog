@@ -1,6 +1,6 @@
 # burnlog
 
-**Know where your Claude Code tokens go. Stop the bleeding.**
+**Know where your AI coding tokens go. Stop the bleeding.**
 
 [![npm version](https://img.shields.io/npm/v/burnlog)](https://www.npmjs.com/package/burnlog)
 [![npm downloads](https://img.shields.io/npm/dm/burnlog)](https://www.npmjs.com/package/burnlog)
@@ -38,12 +38,21 @@ $ burnlog waste
 
 ## The problem
 
-Claude Code sessions can cost $5-$200+. You have no idea where that goes. burnlog reads the data Claude Code already stores (`~/.claude/`) and cross-references it with `git log` to answer:
+AI coding sessions can cost $5-$200+. You have no idea where that goes. burnlog reads the data your AI coding assistant already stores and cross-references it with `git log` to answer:
 
 - Which project eats the most budget?
 - Did that $50 session actually produce commits?
 - Am I stuck in retry loops burning tokens for nothing?
 - What's my efficiency trend this week vs last?
+
+## Supported providers
+
+burnlog currently supports **Claude Code** (reads from `~/.claude/`). The architecture is designed to support additional AI coding assistants in the future:
+
+- **Claude Code** — fully supported
+- **Codex CLI** — planned
+- **OpenCode** — planned
+- **Amp** — planned
 
 ## Try it now
 
@@ -79,9 +88,18 @@ npm install -g burnlog
 | `burnlog session <id>` | Deep dive: exchange log, waste signals, correlated commits |
 | `burnlog waste` | Detect wasted spend with actionable suggestions |
 | `burnlog branch feat/US-402` | Cost breakdown for a feature branch ($/commit, $/line) |
-| `burnlog compare feat/US-402 fix/US-411` | Side-by-side efficiency comparison between branches |
+| `burnlog branch feat/US-402 fix/US-411` | Side-by-side efficiency comparison between two branches |
 
-All commands support `--period` (7d, 30d, 90d), `--project`, and `-f json|csv|table`.
+All commands support `--period` (7d, 30d, 90d), `--project`, `-f json|csv|table`, and `--offline`.
+
+## Dynamic pricing
+
+burnlog fetches up-to-date model pricing from [LiteLLM](https://github.com/BerriAI/litellm) automatically and caches it for 24 hours. This means new models and price changes are picked up without updating burnlog itself.
+
+```bash
+burnlog report              # auto-fetches pricing if cache expired
+burnlog report --offline    # uses bundled pricing (no network)
+```
 
 ## What it detects
 

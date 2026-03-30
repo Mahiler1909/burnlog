@@ -320,8 +320,8 @@ describe("InsightsEngine", () => {
       const signals = engine.analyze([session]);
       const rebuild = signals.find((s) => s.type === "context_rebuild");
       expect(rebuild).toBeDefined();
-      // Opus cache write is $18.75/M, so 100K tokens = $1.875
-      expect(rebuild!.estimatedWastedCostUSD).toBeCloseTo(1.875, 2);
+      // Opus 4.6 cache write is $6.25/M, so 100K tokens = $0.625
+      expect(rebuild!.estimatedWastedCostUSD).toBeCloseTo(0.625, 2);
     });
 
     it("assigns 'avoidable' to retry_loop, debugging_loop, wrong_approach", () => {
