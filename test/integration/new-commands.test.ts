@@ -66,7 +66,7 @@ function makeWeeklySessions(): Session[] {
   return sessions;
 }
 
-describe("todayCommand", () => {
+describe("reportCommand --today (alias)", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -79,8 +79,8 @@ describe("todayCommand", () => {
 
   it("shows today's summary in JSON", async () => {
     setTestSessions(makeTodaySessions());
-    const { todayCommand } = await import("../../src/cli/commands/today.js");
-    await todayCommand({ format: "json" });
+    const { reportCommand } = await import("../../src/cli/commands/report.js");
+    await reportCommand({ format: "json", today: true });
 
     const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -92,8 +92,8 @@ describe("todayCommand", () => {
 
   it("prints message when no sessions in last 7 days", async () => {
     clearTestSessions();
-    const { todayCommand } = await import("../../src/cli/commands/today.js");
-    await todayCommand({ format: "json" });
+    const { reportCommand } = await import("../../src/cli/commands/report.js");
+    await reportCommand({ format: "json", today: true });
 
     const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     expect(output).toContain("No sessions found in the last 7 days");
@@ -115,8 +115,8 @@ describe("todayCommand", () => {
         exchanges: [createExchange({ estimatedCostUSD: 12 })],
       }),
     ]);
-    const { todayCommand } = await import("../../src/cli/commands/today.js");
-    await todayCommand({ format: "table" });
+    const { reportCommand } = await import("../../src/cli/commands/report.js");
+    await reportCommand({ format: "table", today: true });
 
     const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
     expect(output).toContain("No sessions today");
@@ -126,8 +126,8 @@ describe("todayCommand", () => {
 
   it("renders table format", async () => {
     setTestSessions(makeTodaySessions());
-    const { todayCommand } = await import("../../src/cli/commands/today.js");
-    await todayCommand({ format: "table" });
+    const { reportCommand } = await import("../../src/cli/commands/report.js");
+    await reportCommand({ format: "table", today: true });
 
     const output = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
     expect(output).toContain("Burnlog Today");

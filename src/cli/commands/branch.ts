@@ -1,14 +1,20 @@
 import { ClaudeCodeProvider } from "../../providers/claude-code/provider.js";
 import { GitAnalyzer } from "../../git/git-analyzer.js";
 import { CorrelationEngine } from "../../core/correlation-engine.js";
-import { renderBranchDetail } from "../formatters/table.js";
+import { renderBranchDetail, renderBranchComparison } from "../formatters/table.js";
 import { outputAs, type OutputFormat } from "../formatters/export.js";
 import { filterByProject } from "../../utils/filters.js";
+import type { BranchWork } from "../../data/models.js";
 
 export async function branchCommand(
-  branchName: string,
+  branches: string[],
   options: { project?: string; format?: string },
 ): Promise<void> {
+  if (branches.length > 2) {
+    console.log("Compare supports exactly 2 branches.");
+    return;
+  }
+
   const provider = new ClaudeCodeProvider();
   let sessions = await provider.loadAllSessions();
 
@@ -35,6 +41,46 @@ export async function branchCommand(
     }
   }
 
+  const format = (options.format || "table") as OutputFormat;
+
+  // Compare mode: two branches side-by-side
+  if (branches.length === 2) {
+    const workA = await engine.correlateBranch(branches[0], projectPath, sessions);
+    const workB = await engine.correlateBranch(branches[1], projectPath, sessions);
+
+    if (!workA && !workB) {
+      console.log("No sessions found for either branch.");
+      return;
+    }
+
+    const toBranchData = (bw: BranchWork | null, name: string) => {
+      if (!bw) return { branch: name, sessions: 0, commits: 0, cost: 0 };
+      const linesAdded = bw.commits.reduce((s, c) => s + c.linesAdded, 0);
+      const linesRemoved = bw.commits.reduce((s, c) => s + c.linesRemoved, 0);
+      return {
+        branch: bw.branchName,
+        sessions: bw.sessions.length,
+        commits: bw.commits.length,
+        cost: Math.round(bw.totalCostUSD * 100) / 100,
+        costPerCommit: bw.commits.length > 0 ? Math.round(bw.costPerCommit * 100) / 100 : null,
+        linesAdded,
+        linesRemoved,
+        costPerLine: (linesAdded + linesRemoved) > 0 ? Math.round(bw.costPerLineChanged * 1000) / 1000 : null,
+        wasteRatio: Math.round(bw.wasteRatio * 100),
+      };
+    };
+
+    const data = [toBranchData(workA, branches[0]), toBranchData(workB, branches[1])];
+
+    outputAs(format, data, () => {
+      renderBranchComparison(workA, workB);
+    });
+    return;
+  }
+
+  // Single branch detail mode
+  const branchName = branches[0];
+
   // Collect warnings
   const warnings: string[] = [];
   if (!repoFound) {
@@ -50,8 +96,6 @@ export async function branchCommand(
     console.log(`No sessions found for branch: ${branchName}`);
     return;
   }
-
-  const format = (options.format || "table") as OutputFormat;
 
   const linesAdded = branchWork.commits.reduce((s, c) => s + c.linesAdded, 0);
   const linesRemoved = branchWork.commits.reduce((s, c) => s + c.linesRemoved, 0);
