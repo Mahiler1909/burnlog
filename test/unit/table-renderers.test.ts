@@ -290,6 +290,18 @@ describe("renderWasteReport", () => {
     expect(output).toContain("Tips");
   });
 
+  it("separates avoidable waste from platform overhead", () => {
+    const signals: WasteSignal[] = [
+      { type: "abandoned_session", category: "avoidable", sessionId: "s1", estimatedWastedCostUSD: 5, description: "No commits", suggestion: "Plan better" },
+      { type: "context_rebuild", category: "platform_overhead", sessionId: "s2", estimatedWastedCostUSD: 3, description: "Cache rebuilt", suggestion: "Split sessions" },
+    ];
+    const output = captureConsole(() => renderWasteReport(signals, sessions, "Last 30 days"));
+    expect(output).toContain("Avoidable Waste");
+    expect(output).toContain("Platform Overhead");
+    expect(output).toContain("$5.00"); // avoidable
+    expect(output).toContain("$3.00"); // overhead
+  });
+
   it("renders clean message when no signals", () => {
     const output = captureConsole(() => renderWasteReport([], sessions, "Last 7 days"));
     expect(output).toContain("No waste signals detected");
