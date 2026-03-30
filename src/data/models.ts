@@ -119,8 +119,11 @@ export interface Project {
   sessions: Session[];
 }
 
+export type WasteCategory = "platform_overhead" | "avoidable";
+
 export interface WasteSignal {
   type: WasteType;
+  category: WasteCategory;
   sessionId: string;
   estimatedWastedCostUSD: number;
   description: string;

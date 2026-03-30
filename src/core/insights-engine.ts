@@ -1,4 +1,17 @@
-import type { Session, WasteSignal } from "../data/models.js";
+import type { Session, WasteSignal, WasteCategory } from "../data/models.js";
+import { getModelPricing } from "../utils/pricing-tables.js";
+
+const WASTE_CATEGORIES: Record<string, WasteCategory> = {
+  context_rebuild: "platform_overhead",
+  retry_loop: "avoidable",
+  debugging_loop: "avoidable",
+  wrong_approach: "avoidable",
+  abandoned_session: "avoidable",
+  excessive_exploration: "avoidable",
+  stalled_exploration: "avoidable",
+  error_cascade: "avoidable",
+  high_cost_per_line: "avoidable",
+};
 
 export class InsightsEngine {
   analyze(sessions: Session[]): WasteSignal[] {
@@ -57,6 +70,7 @@ function detectRetryLoops(session: Session): WasteSignal[] {
       if (streak >= 3) {
         signals.push({
           type: "retry_loop",
+          category: "avoidable",
           sessionId: session.id,
           estimatedWastedCostUSD: streakCost,
           description: `${streak} consecutive retries on ${streakFiles.join(", ")}`,
@@ -72,6 +86,7 @@ function detectRetryLoops(session: Session): WasteSignal[] {
   if (streak >= 3) {
     signals.push({
       type: "retry_loop",
+      category: "avoidable",
       sessionId: session.id,
       estimatedWastedCostUSD: streakCost,
       description: `${streak} consecutive retries on ${streakFiles.join(", ")}`,
@@ -92,6 +107,7 @@ function detectAbandonedSession(session: Session): WasteSignal | null {
 
   return {
     type: "abandoned_session",
+    category: "avoidable",
     sessionId: session.id,
     estimatedWastedCostUSD: session.estimatedCostUSD,
     description: `Session ended with no commits and outcome: not_achieved`,
@@ -113,10 +129,12 @@ function detectContextRebuilds(session: Session): WasteSignal[] {
       : 0;
 
     if (lastHadCacheRead && cacheWriteRatio > 0.3 && ex.tokenUsage.cacheCreationTokens > 50_000) {
-      // Estimate rebuild cost using average cache write pricing ($3.75/M for Sonnet)
-      const rebuildCost = (ex.tokenUsage.cacheCreationTokens / 1_000_000) * 3.75;
+      // Use actual model pricing for cache write cost
+      const pricing = getModelPricing(ex.model);
+      const rebuildCost = (ex.tokenUsage.cacheCreationTokens / 1_000_000) * pricing.cacheWritePerMillion;
       signals.push({
         type: "context_rebuild",
+        category: "platform_overhead",
         sessionId: session.id,
         estimatedWastedCostUSD: rebuildCost,
         description: `Cache rebuilt at exchange #${ex.sequenceNumber} (${formatK(ex.tokenUsage.cacheCreationTokens)} cache write tokens)`,
@@ -143,6 +161,7 @@ function detectExcessiveExploration(session: Session): WasteSignal | null {
   if (ratio > 0.70 && implementation === 0) {
     return {
       type: "excessive_exploration",
+      category: "avoidable",
       sessionId: session.id,
       estimatedWastedCostUSD: session.estimatedCostUSD * 0.3,
       description: `${Math.round(ratio * 100)}% of exchanges were read-only with no edits (${exploration}/${session.exchanges.length})`,
@@ -185,6 +204,7 @@ function detectErrorCascade(session: Session): WasteSignal | null {
   if (maxStreak >= 3) {
     return {
       type: "error_cascade",
+      category: "avoidable",
       sessionId: session.id,
       estimatedWastedCostUSD: maxStreakCost * 0.5,
       description: `${maxStreak} consecutive debugging exchanges with ${session.toolErrors} total tool errors`,
@@ -210,6 +230,7 @@ function detectKnownFrictions(session: Session): WasteSignal[] {
       if (wastedCost < 0.10) continue;
       signals.push({
         type: "wrong_approach",
+        category: "avoidable",
         sessionId: session.id,
         estimatedWastedCostUSD: wastedCost,
         description: `${friction.count}x ${friction.type}: ${friction.detail}`,
@@ -253,6 +274,7 @@ function detectDebuggingLoops(session: Session): WasteSignal[] {
       if (streak >= 4) {
         signals.push({
           type: "debugging_loop",
+          category: "avoidable",
           sessionId: session.id,
           estimatedWastedCostUSD: streakCost * 0.5,
           description: `${streak} consecutive fix attempts on ${streakFiles.slice(0, 3).map(f => f.split("/").pop()).join(", ")}`,
@@ -268,6 +290,7 @@ function detectDebuggingLoops(session: Session): WasteSignal[] {
   if (streak >= 4) {
     signals.push({
       type: "debugging_loop",
+      category: "avoidable",
       sessionId: session.id,
       estimatedWastedCostUSD: streakCost * 0.5,
       description: `${streak} consecutive fix attempts on ${streakFiles.slice(0, 3).map(f => f.split("/").pop()).join(", ")}`,
@@ -293,6 +316,7 @@ function detectHighCostPerLine(session: Session): WasteSignal | null {
     const excessCost = session.estimatedCostUSD - (totalLines * 0.10); // $0.10/line is "normal"
     return {
       type: "high_cost_per_line",
+      category: "avoidable",
       sessionId: session.id,
       estimatedWastedCostUSD: Math.max(excessCost * 0.3, 0), // 30% of excess is waste
       description: `$${costPerLine.toFixed(2)}/line (${totalLines} lines changed for $${session.estimatedCostUSD.toFixed(2)})`,
@@ -357,6 +381,7 @@ function detectStalledExploration(session: Session): WasteSignal | null {
   if (maxStreak >= 3 && maxStreakCost > 10) {
     return {
       type: "stalled_exploration",
+      category: "avoidable",
       sessionId: session.id,
       estimatedWastedCostUSD: maxStreakCost * 0.4,
       description: `${maxStreak} consecutive exploration/minimal-prompt exchanges costing $${maxStreakCost.toFixed(2)}`,

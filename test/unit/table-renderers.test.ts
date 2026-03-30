@@ -159,6 +159,7 @@ describe("renderSessionDetail", () => {
     const session = createSession();
     const signals: WasteSignal[] = [{
       type: "abandoned_session",
+      category: "avoidable",
       sessionId: session.id,
       estimatedWastedCostUSD: 5,
       description: "Test waste",
@@ -279,8 +280,8 @@ describe("renderBranchComparison", () => {
 describe("renderWasteReport", () => {
   it("renders waste summary and signals", () => {
     const signals: WasteSignal[] = [
-      { type: "abandoned_session", sessionId: "s1", estimatedWastedCostUSD: 5, description: "No commits", suggestion: "Plan better" },
-      { type: "retry_loop", sessionId: "s2", estimatedWastedCostUSD: 3, description: "3 retries", suggestion: "Give context" },
+      { type: "abandoned_session", category: "avoidable", sessionId: "s1", estimatedWastedCostUSD: 5, description: "No commits", suggestion: "Plan better" },
+      { type: "retry_loop", category: "avoidable", sessionId: "s2", estimatedWastedCostUSD: 3, description: "3 retries", suggestion: "Give context" },
     ];
     const output = captureConsole(() => renderWasteReport(signals, sessions, "Last 30 days"));
     expect(output).toContain("Waste Report");

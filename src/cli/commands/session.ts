@@ -38,7 +38,8 @@ export async function sessionCommand(sessionId: string, options: { format?: stri
       if (branchName === "HEAD") {
         branchName = await git.getCurrentBranch(root) || branchName;
       }
-      const bw = await engine.correlateBranch(branchName, root, allSessions);
+      const projectSessions = allSessions.filter(s => s.projectName === session.projectName);
+      const bw = await engine.correlateBranch(branchName, root, projectSessions);
       if (bw) commits = bw.commits;
     }
   }
@@ -61,8 +62,15 @@ export async function sessionCommand(sessionId: string, options: { format?: stri
     linesRemoved: session.linesRemoved,
     filesModified: session.filesModified,
     tokens: totalTokens(session.tokenUsage),
+    tokenBreakdown: {
+      input: session.tokenUsage.inputTokens,
+      output: session.tokenUsage.outputTokens,
+      cacheCreation: session.tokenUsage.cacheCreationTokens,
+      cacheRead: session.tokenUsage.cacheReadTokens,
+    },
     wasteSignals: wasteSignals.map((w) => ({
       type: w.type,
+      category: w.category,
       cost: Math.round(w.estimatedWastedCostUSD * 100) / 100,
       description: w.description,
     })),

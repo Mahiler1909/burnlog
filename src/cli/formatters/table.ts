@@ -687,13 +687,19 @@ export function renderWasteReport(signals: WasteSignal[], sessions: Session[], p
 
   const topType = [...byType.entries()].sort((a, b) => b[1].cost - a[1].cost)[0];
 
+  const avoidableWaste = signals.filter(s => s.category === "avoidable").reduce((s, x) => s + x.estimatedWastedCostUSD, 0);
+  const overheadWaste = signals.filter(s => s.category === "platform_overhead").reduce((s, x) => s + x.estimatedWastedCostUSD, 0);
+  const avoidablePct = totalSpend > 0 ? ((avoidableWaste / totalSpend) * 100).toFixed(1) : "0.0";
+
   console.log();
   console.log(chalk.bold(`Burnlog Waste Report (${periodLabel})`));
   console.log(chalk.dim("═".repeat(60)));
-  console.log(`  Total Spend:      ${chalk.bold.green(formatCurrency(totalSpend))}`);
-  console.log(`  Estimated Waste:  ${chalk.bold.red(formatCurrency(totalWaste))} (${wastePct}%) ${chalk.red(renderBar(totalSpend > 0 ? totalWaste / totalSpend : 0, 15))}`);
+  console.log(`  Total Spend:       ${chalk.bold.green(formatCurrency(totalSpend))}`);
+  console.log(`  Avoidable Waste:   ${chalk.bold.red(formatCurrency(avoidableWaste))} (${avoidablePct}%) ${chalk.red(renderBar(totalSpend > 0 ? avoidableWaste / totalSpend : 0, 15))}`);
+  console.log(`  Platform Overhead: ${chalk.dim(formatCurrency(overheadWaste))} (context rebuilds)`);
+  console.log(`  Total:             ${chalk.bold.red(formatCurrency(totalWaste))} (${wastePct}%)`);
   if (topType) {
-    console.log(`  Top Waste Type:   ${humanizeWasteType(topType[0])} (${formatCurrency(topType[1].cost)})`);
+    console.log(`  Top Waste Type:    ${humanizeWasteType(topType[0])} (${formatCurrency(topType[1].cost)})`);
   }
   console.log();
 
