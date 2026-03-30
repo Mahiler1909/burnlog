@@ -8,13 +8,19 @@ import { branchCommand } from "./cli/commands/branch.js";
 import { wasteCommand } from "./cli/commands/waste.js";
 import { budgetCommand, budgetSetCommand } from "./cli/commands/budget.js";
 import { trendsCommand } from "./cli/commands/trends.js";
+import { initPricing } from "./utils/pricing-tables.js";
 
 const program = new Command();
 
 program
   .name("burnlog")
   .description("Correlate AI token usage with real development work")
-  .version("0.2.1");
+  .version("0.3.0")
+  .option("--offline", "Skip remote pricing fetch, use bundled data")
+  .hook("preAction", async () => {
+    const opts = program.opts();
+    await initPricing({ offline: opts.offline });
+  });
 
 function addFormatOption(cmd: Command): Command {
   return cmd.addOption(
