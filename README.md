@@ -162,12 +162,13 @@ alias burn="npx burnlog today"
 
 ## AI agent integration
 
-burnlog ships with a [Claude Code skill](/.claude/skills/burnlog-monitor/SKILL.md) that lets your AI coding agent monitor its own token spend. Copy the skill to your project:
+burnlog is a [Claude Code plugin](/.claude-plugin/plugin.json) — your AI coding agent can monitor its own token spend. Install with:
 
 ```bash
-# Copy the skill to your project's .claude/skills/
-cp -r node_modules/burnlog/.claude/skills/burnlog-monitor .claude/skills/
+/plugin marketplace add Mahiler1909/burnlog
 ```
+
+Then use `/burnlog:monitor` from any project. The agent can proactively report spend, warn about budget limits, and suggest improvements based on waste patterns.
 
 Or reference it directly in your `CLAUDE.md`:
 
@@ -175,8 +176,6 @@ Or reference it directly in your `CLAUDE.md`:
 Use `npx burnlog today -f json` to check daily spend before starting work.
 Use `npx burnlog waste -f json` to check for waste patterns after completing tasks.
 ```
-
-The agent can then proactively report spend, warn about budget limits, and suggest improvements based on waste patterns — all without you asking.
 
 ## How it works
 

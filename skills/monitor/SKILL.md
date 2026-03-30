@@ -1,6 +1,6 @@
 ---
-name: burnlog-monitor
-description: "Monitor your AI coding token spend using burnlog. Use this skill proactively to check daily spend, budget status, waste patterns, and efficiency before and after working on tasks. Invoke when the user says: '/burnlog-monitor', 'how much have I spent', 'check my spend', 'check my budget', 'am I wasting tokens', 'cuanto llevo gastado', 'revisa mi gasto'."
+name: monitor
+description: "Monitor your AI coding token spend using burnlog. Use this skill proactively to check daily spend, budget status, waste patterns, and efficiency before and after working on tasks. Invoke when the user says: '/burnlog:monitor', 'how much have I spent', 'check my spend', 'check my budget', 'am I wasting tokens', 'cuanto llevo gastado', 'revisa mi gasto'."
 ---
 
 # burnlog monitor

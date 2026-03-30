@@ -1,0 +1,13 @@
+{
+  "name": "burnlog",
+  "version": "0.3.0",
+  "description": "Monitor and optimize your AI coding token spend. Track costs, detect waste patterns, set budgets, and get efficiency scores — all from your AI agent.",
+  "author": {
+    "name": "Fernando Chullo",
+    "email": "mahiler1909@gmail.com"
+  },
+  "homepage": "https://github.com/Mahiler1909/burnlog",
+  "repository": "https://github.com/Mahiler1909/burnlog",
+  "license": "MIT",
+  "keywords": ["burnlog", "tokens", "cost", "waste", "budget", "efficiency", "claude-code"]
+}
