@@ -6,8 +6,6 @@ import { sessionsCommand } from "./cli/commands/sessions.js";
 import { sessionCommand } from "./cli/commands/session.js";
 import { branchCommand } from "./cli/commands/branch.js";
 import { wasteCommand } from "./cli/commands/waste.js";
-import { compareCommand } from "./cli/commands/compare.js";
-import { todayCommand } from "./cli/commands/today.js";
 import { budgetCommand, budgetSetCommand } from "./cli/commands/budget.js";
 import { trendsCommand } from "./cli/commands/trends.js";
 
@@ -57,8 +55,8 @@ addFormatOption(
 
 addFormatOption(
   program
-    .command("branch <name>")
-    .description("Cost breakdown for a feature branch")
+    .command("branch <branches...>")
+    .description("Cost breakdown for a branch, or compare two branches")
     .option("--project <path>", "Filter by project name or path"),
 ).action(branchCommand);
 
@@ -70,20 +68,13 @@ addFormatOption(
     .option("--project <path>", "Filter by project name or path"),
 ).action(wasteCommand);
 
-addFormatOption(
-  program
-    .command("compare <branchA> <branchB>")
-    .description("Compare efficiency between two branches (use --project for multi-project)")
-    .option("--project <path>", "Filter by project name or path"),
-).action(compareCommand);
-
 // ── New v0.2.0 commands ──────────────────────────────────────────
 
 addFormatOption(
   program
     .command("today")
-    .description("Quick summary of today's token spend and efficiency"),
-).action(todayCommand);
+    .description("Quick summary of today's spend (alias for report --period 1d)"),
+).action((opts: { format?: string }) => reportCommand({ ...opts, today: true }));
 
 const budgetCmd = program
   .command("budget")
