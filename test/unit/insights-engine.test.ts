@@ -272,6 +272,81 @@ describe("InsightsEngine", () => {
     });
   });
 
+  describe("waste categories", () => {
+    it("assigns 'avoidable' category to user-caused waste", () => {
+      const session = createSession({
+        outcome: "not_achieved",
+        gitCommits: 0,
+        estimatedCostUSD: 5.0,
+      });
+      const signals = engine.analyze([session]);
+      const abandoned = signals.find((s) => s.type === "abandoned_session");
+      expect(abandoned?.category).toBe("avoidable");
+    });
+
+    it("assigns 'platform_overhead' category to context_rebuild", () => {
+      const session = createSession({
+        exchanges: [
+          createExchange({
+            sequenceNumber: 0,
+            tokenUsage: { inputTokens: 10_000, outputTokens: 500, cacheCreationTokens: 0, cacheReadTokens: 50_000 },
+          }),
+          createExchange({
+            sequenceNumber: 1,
+            tokenUsage: { inputTokens: 10_000, outputTokens: 500, cacheCreationTokens: 80_000, cacheReadTokens: 1_000 },
+          }),
+        ],
+      });
+      const signals = engine.analyze([session]);
+      const rebuild = signals.find((s) => s.type === "context_rebuild");
+      expect(rebuild?.category).toBe("platform_overhead");
+    });
+
+    it("uses actual model pricing for context_rebuild cost", () => {
+      const session = createSession({
+        exchanges: [
+          createExchange({
+            sequenceNumber: 0,
+            model: "claude-opus-4-6",
+            tokenUsage: { inputTokens: 10_000, outputTokens: 500, cacheCreationTokens: 0, cacheReadTokens: 50_000 },
+          }),
+          createExchange({
+            sequenceNumber: 1,
+            model: "claude-opus-4-6",
+            tokenUsage: { inputTokens: 10_000, outputTokens: 500, cacheCreationTokens: 100_000, cacheReadTokens: 1_000 },
+          }),
+        ],
+      });
+      const signals = engine.analyze([session]);
+      const rebuild = signals.find((s) => s.type === "context_rebuild");
+      expect(rebuild).toBeDefined();
+      // Opus cache write is $18.75/M, so 100K tokens = $1.875
+      expect(rebuild!.estimatedWastedCostUSD).toBeCloseTo(1.875, 2);
+    });
+
+    it("assigns 'avoidable' to retry_loop, debugging_loop, wrong_approach", () => {
+      // retry_loop
+      const retrySession = createSession({
+        exchanges: [
+          createExchange({ sequenceNumber: 0, userPrompt: "fix the bug in auth.ts please", filesModified: ["auth.ts"], estimatedCostUSD: 0.5 }),
+          createExchange({ sequenceNumber: 1, userPrompt: "fix the bug in auth.ts now", filesModified: ["auth.ts"], estimatedCostUSD: 0.5 }),
+          createExchange({ sequenceNumber: 2, userPrompt: "fix the bug in auth.ts again", filesModified: ["auth.ts"], estimatedCostUSD: 0.5 }),
+          createExchange({ sequenceNumber: 3, userPrompt: "fix the bug in auth.ts correctly", filesModified: ["auth.ts"], estimatedCostUSD: 0.5 }),
+        ],
+      });
+      const retrySignals = engine.analyze([retrySession]);
+      expect(retrySignals.filter((s) => s.type === "retry_loop").every((s) => s.category === "avoidable")).toBe(true);
+
+      // wrong_approach
+      const wrongSession = createSession({
+        estimatedCostUSD: 10,
+        frictions: [{ type: "wrong_approach", count: 2, detail: "Wrong pattern" }],
+      });
+      const wrongSignals = engine.analyze([wrongSession]);
+      expect(wrongSignals.filter((s) => s.type === "wrong_approach").every((s) => s.category === "avoidable")).toBe(true);
+    });
+  });
+
   describe("sorting", () => {
     it("sorts signals by wasted cost descending", () => {
       const sessions = [
