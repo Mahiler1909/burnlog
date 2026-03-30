@@ -160,6 +160,24 @@ burnlog sessions -f csv > sessions.csv
 alias burn="npx burnlog today"
 ```
 
+## AI agent integration
+
+burnlog ships with a [Claude Code skill](/.claude/skills/burnlog-monitor/SKILL.md) that lets your AI coding agent monitor its own token spend. Copy the skill to your project:
+
+```bash
+# Copy the skill to your project's .claude/skills/
+cp -r node_modules/burnlog/.claude/skills/burnlog-monitor .claude/skills/
+```
+
+Or reference it directly in your `CLAUDE.md`:
+
+```markdown
+Use `npx burnlog today -f json` to check daily spend before starting work.
+Use `npx burnlog waste -f json` to check for waste patterns after completing tasks.
+```
+
+The agent can then proactively report spend, warn about budget limits, and suggest improvements based on waste patterns — all without you asking.
+
 ## How it works
 
 burnlog reads from `~/.claude/projects/` (session indexes, JSONL conversation logs, facets, and session metadata). It correlates sessions to git commits using a 3-tier strategy:

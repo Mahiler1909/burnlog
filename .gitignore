@@ -12,8 +12,11 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Claude Code
-.claude/
+# Claude Code (keep skills/ public, ignore local state)
+.claude/settings.local.json
+.claude/plans/
+.claude/todos/
+.claude/worktrees/
 
 # Environment
 .env
