@@ -5,7 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-03-16
+## [0.3.0] - 2026-03-30
+
+Architecture overhaul, dynamic pricing, and CLI simplification. Same commands, better foundations.
+
+### Added
+
+#### Dynamic pricing
+- Auto-fetch pricing from [LiteLLM](https://github.com/BerriAI/litellm) with 24-hour disk cache
+- Bundled fallback pricing (`src/data/pricing.json`) for fully offline usage
+- `--offline` global flag to skip remote fetch and use bundled data
+- 4 new models: `opus-4-1`, `opus-4`, `sonnet-4`, `sonnet-3-7`
+
+#### Multi-provider architecture
+- `AIToolProvider` interface ready for future providers (Codex CLI, OpenCode, Amp)
+- Extracted 5 focused modules from `ClaudeCodeProvider`:
+  - `jsonl-parser` — JSONL → exchanges (pure parser)
+  - `exchange-classifier` — tool category classification
+  - `outcome-inferrer` — outcome/summary/goal heuristics
+  - `path-resolver` — 5-strategy project path resolution
+  - `session-builder` — facets/meta/exchanges merge
+
+#### Testing
+- 255 tests across 21 test files (up from 203)
+- New unit tests for exchange classifier, outcome inferrer, and pricing fetcher
+- Comprehensive coverage for waste categories, model pricing, and table renderers
+
+### Changed
+- `compare` command merged into `branch` — use `burnlog branch feat/a feat/b` for side-by-side comparison
+- `today` command is now a thin alias for `report --today`
+- CLI reduced from 9 commands to 7 (zero functionality lost)
+- Visual primitives extracted from `table.ts` into `visual.ts` with barrel re-exports (backward compatible)
+- Provider reduced from 692 LOC monolith to ~160 LOC orchestrator
+
+### Fixed
+- Opus 4.6 pricing corrected from $15/$75 to $5/$25 per million tokens (was 3x overpriced)
+- Haiku 4.5 pricing corrected from $0.80/$4 to $1/$5 per million tokens (was 20% under)
+- Git correlation missing commits due to branch name mismatch
+- Waste category detection thresholds
+- Outcome inference for edge cases
+- Cost calculation data accuracy
+
+## [0.2.1] - 2026-03-28
 
 Visual overhaul and new high-value commands. Zero new runtime dependencies.
 
@@ -85,4 +126,6 @@ produces cost, waste, and efficiency reports from the terminal.
 - Unit tests for all pure functions (pricing, filters, period, token-ledger, export, formatters)
 - Integration tests for correlation engine, CLI commands, and exchange classification
 
+[0.3.0]: https://github.com/Mahiler1909/burnlog/releases/tag/v0.3.0
+[0.2.1]: https://github.com/Mahiler1909/burnlog/releases/tag/v0.2.1
 [0.1.0]: https://github.com/Mahiler1909/burnlog/releases/tag/v0.1.0
